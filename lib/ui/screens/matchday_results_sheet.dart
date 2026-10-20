@@ -10,6 +10,7 @@ Future<void> showMatchdayResults(
   required List<FixtureMatch> matches,
   required Map<int, Team> teams,
   required int userTeamId,
+  required String Function(FixtureMatch) competitionLabel,
   String? date,
 }) {
   if (matches.isEmpty) return Future<void>.value();
@@ -32,6 +33,7 @@ Future<void> showMatchdayResults(
         matches: sorted,
         teams: teams,
         userTeamId: userTeamId,
+        competitionLabel: competitionLabel,
         date: date,
       ),
     ),
@@ -43,12 +45,14 @@ class _MatchdayResultsSheet extends StatelessWidget {
     required this.matches,
     required this.teams,
     required this.userTeamId,
+    required this.competitionLabel,
     required this.date,
   });
 
   final List<FixtureMatch> matches;
   final Map<int, Team> teams;
   final int userTeamId;
+  final String Function(FixtureMatch) competitionLabel;
   final String? date;
 
   @override
@@ -145,52 +149,70 @@ class _MatchdayResultsSheet extends StatelessWidget {
         color: mine ? AppTheme.accentDim.withAlpha(70) : AppTheme.surfaceCard,
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Expanded(
-            child: Text(
-              home?.name ?? '?',
-              textAlign: TextAlign.right,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: mine ? FontWeight.w700 : FontWeight.w400,
-              ),
+          Text(
+            competitionLabel(match).toUpperCase(),
+            style: const TextStyle(
+              fontSize: 9,
+              letterSpacing: .6,
+              color: AppTheme.textDim,
+              fontWeight: FontWeight.bold,
             ),
           ),
-          Container(
-            width: 62,
-            alignment: Alignment.center,
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            child: Column(
-              children: <Widget>[
-                Text(
-                  '${match.homeGoals ?? 0} - ${match.awayGoals ?? 0}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
+          const SizedBox(height: 3),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  home?.name ?? '?',
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: mine ? FontWeight.w700 : FontWeight.w400,
                   ),
                 ),
-                if ((match.penaltyHomeGoals ?? 0) > 0 ||
-                    (match.penaltyAwayGoals ?? 0) > 0)
-                  Text(
-                    'pens ${match.penaltyHomeGoals}-${match.penaltyAwayGoals}',
-                    style: const TextStyle(fontSize: 9, color: AppTheme.warn),
-                  ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Text(
-              away?.name ?? '?',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: mine ? FontWeight.w700 : FontWeight.w400,
               ),
-            ),
+              Container(
+                width: 62,
+                alignment: Alignment.center,
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                child: Column(
+                  children: <Widget>[
+                    Text(
+                      '${match.homeGoals ?? 0} - ${match.awayGoals ?? 0}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    if ((match.penaltyHomeGoals ?? 0) > 0 ||
+                        (match.penaltyAwayGoals ?? 0) > 0)
+                      Text(
+                        'pens ${match.penaltyHomeGoals}-${match.penaltyAwayGoals}',
+                        style: const TextStyle(
+                          fontSize: 9,
+                          color: AppTheme.warn,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  away?.name ?? '?',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: mine ? FontWeight.w700 : FontWeight.w400,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../data/models/models.dart';
 import '../../state/career_provider.dart';
 import '../theme.dart';
+import 'knockout_bracket_sheet.dart';
 
 /// Season calendar grouped by match week with results and upcoming games.
 class FixturesTab extends StatefulWidget {
@@ -44,25 +45,18 @@ class _FixturesTabState extends State<FixturesTab> {
       return const Center(child: Text('No fixtures yet'));
     }
     final int leagueId = game.league?.tournamentId ?? 0;
-    // Bracket size is fixed by the first knockout round, not by the last
-    // round that happens to be scheduled already. Counting the first round's
-    // ties keeps early fixtures labelled "Round of 32" instead of "Final".
-    final Map<int, int> firstPhases = <int, int>{};
-    final Map<int, int> firstPhaseCounts = <int, int>{};
-    for (final FixtureMatch m in list) {
-      if (m.tournamentId == leagueId || m.groupId != null) continue;
-      final int? current = firstPhases[m.tournamentId];
-      if (current == null || m.phase < current) {
-        firstPhases[m.tournamentId] = m.phase;
-        firstPhaseCounts[m.tournamentId] = 1;
-      } else if (m.phase == current) {
-        firstPhaseCounts[m.tournamentId] =
-            (firstPhaseCounts[m.tournamentId] ?? 0) + 1;
-      }
+    final Map<int, List<FixtureMatch>> knockoutMatches =
+        <int, List<FixtureMatch>>{};
+    for (final FixtureMatch match in list) {
+      if (match.tournamentId == leagueId || match.groupId != null) continue;
+      knockoutMatches
+          .putIfAbsent(match.tournamentId, () => <FixtureMatch>[])
+          .add(match);
     }
     final Map<int, int> totalRounds = <int, int>{
-      for (final MapEntry<int, int> entry in firstPhaseCounts.entries)
-        entry.key: (entry.value * 2).bitLength - 1,
+      for (final MapEntry<int, List<FixtureMatch>> entry
+          in knockoutMatches.entries)
+        entry.key: knockoutTotalRounds(entry.value),
     };
 
     // Group by tournament + round.
@@ -97,16 +91,48 @@ class _FixturesTabState extends State<FixturesTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 13, 16, 4),
-                child: Text(
-                  '$key  ·  ${date == null ? '' : _formatDate(date)}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: key.startsWith(game.league?.name ?? 'League')
-                        ? AppTheme.accent
-                        : AppTheme.warn,
-                  ),
+                padding: const EdgeInsets.fromLTRB(16, 13, 12, 4),
+                child: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        '$key  ·  ${date == null ? '' : _formatDate(date)}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: group.first.tournamentId == leagueId
+                              ? AppTheme.accent
+                              : AppTheme.warn,
+                        ),
+                      ),
+                    ),
+                    if (knockoutMatches[group.first.tournamentId] != null &&
+                        group.first.phase == 1)
+                      TextButton.icon(
+                        onPressed: () {
+                          Tournament? tournament;
+                          for (final Tournament cup in game.cups) {
+                            if (cup.tournamentId == group.first.tournamentId) {
+                              tournament = cup;
+                              break;
+                            }
+                          }
+                          if (tournament == null) return;
+                          showKnockoutBracket(
+                            context,
+                            tournament: tournament,
+                            matches: knockoutMatches[tournament.tournamentId]!,
+                            teams: game.teamCache,
+                          );
+                        },
+                        icon: const Icon(Icons.account_tree_outlined, size: 15),
+                        label: const Text('Bracket'),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          textStyle: const TextStyle(fontSize: 11),
+                        ),
+                      ),
+                  ],
                 ),
               ),
               for (final FixtureMatch m in group) _fixtureRow(game, m),
@@ -132,54 +158,78 @@ class _FixturesTabState extends State<FixturesTab> {
             : AppTheme.surfaceCard,
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Expanded(
-            child: Text(
-              home?.name ?? '?',
-              textAlign: TextAlign.right,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: involvesUser ? FontWeight.w700 : FontWeight.w400,
-              ),
+          Text(
+            game.competitionLabel(m).toUpperCase(),
+            style: const TextStyle(
+              fontSize: 9,
+              letterSpacing: .6,
+              color: AppTheme.textDim,
+              fontWeight: FontWeight.bold,
             ),
           ),
-          Container(
-            width: 66,
-            alignment: Alignment.center,
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(
-                  played ? '${m.homeGoals ?? 0} - ${m.awayGoals ?? 0}' : 'vs',
+          const SizedBox(height: 3),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  home?.name ?? '?',
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: played ? 14 : 11,
-                    color: played ? Colors.white : AppTheme.textDim,
+                    fontSize: 12,
+                    fontWeight: involvesUser
+                        ? FontWeight.w700
+                        : FontWeight.w400,
                   ),
                 ),
-                if ((m.penaltyHomeGoals ?? 0) > 0 ||
-                    (m.penaltyAwayGoals ?? 0) > 0)
-                  Text(
-                    'pens ${m.penaltyHomeGoals}-${m.penaltyAwayGoals}',
-                    style: const TextStyle(fontSize: 8, color: AppTheme.warn),
-                  ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Text(
-              away?.name ?? '?',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: involvesUser ? FontWeight.w700 : FontWeight.w400,
               ),
-            ),
+              Container(
+                width: 66,
+                alignment: Alignment.center,
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(
+                      played
+                          ? '${m.homeGoals ?? 0} - ${m.awayGoals ?? 0}'
+                          : 'vs',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: played ? 14 : 11,
+                        color: played ? Colors.white : AppTheme.textDim,
+                      ),
+                    ),
+                    if ((m.penaltyHomeGoals ?? 0) > 0 ||
+                        (m.penaltyAwayGoals ?? 0) > 0)
+                      Text(
+                        'pens ${m.penaltyHomeGoals}-${m.penaltyAwayGoals}',
+                        style: const TextStyle(
+                          fontSize: 8,
+                          color: AppTheme.warn,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  away?.name ?? '?',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: involvesUser
+                        ? FontWeight.w700
+                        : FontWeight.w400,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -203,13 +253,4 @@ class _FixturesTabState extends State<FixturesTab> {
     ];
     return '${d.day} ${months[d.month - 1]}';
   }
-}
-
-/// Bracket rounds are labelled from the number of teams still involved, so
-/// trimmed brackets (64, 32, 16, 8 clubs...) get the right round names.
-String knockoutRoundName(int phase, int totalRounds) {
-  final int teamsLeft = 1 << (totalRounds - phase + 1);
-  if (teamsLeft <= 2) return 'Final';
-  if (teamsLeft == 4) return 'Semi-finals';
-  return 'Round of $teamsLeft';
 }

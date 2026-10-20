@@ -386,6 +386,16 @@ class CareerProvider extends ChangeNotifier {
     return null;
   }
 
+  String competitionLabel(FixtureMatch match) {
+    if (match.tournamentId == league?.tournamentId) return 'League';
+    for (final Tournament tournament in cups) {
+      if (tournament.tournamentId == match.tournamentId) {
+        return tournament.isInternational ? 'Intercontinental' : 'Domestic Cup';
+      }
+    }
+    return 'Cup';
+  }
+
   /// Plays the user's live match with full event recording plus the rest of
   /// the matchday, then housekeeping.
   Future<void> startLiveMatch() async {

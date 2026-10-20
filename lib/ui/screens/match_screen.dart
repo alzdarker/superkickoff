@@ -91,7 +91,12 @@ class _MatchScreenState extends State<MatchScreen> {
       appBar: AppBar(title: const Text('Match Day')),
       body: Column(
         children: <Widget>[
-          _scoreBoard(session, homeGoals, awayGoals),
+          _scoreBoard(
+            session,
+            game.competitionLabel(session.match),
+            homeGoals,
+            awayGoals,
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(12),
@@ -123,7 +128,12 @@ class _MatchScreenState extends State<MatchScreen> {
     return goals;
   }
 
-  Widget _scoreBoard(LiveMatchSession session, int homeGoals, int awayGoals) {
+  Widget _scoreBoard(
+    LiveMatchSession session,
+    String competitionLabel,
+    int homeGoals,
+    int awayGoals,
+  ) {
     return Container(
       margin: const EdgeInsets.all(12),
       padding: const EdgeInsets.symmetric(vertical: 18),
@@ -132,74 +142,94 @@ class _MatchScreenState extends State<MatchScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.shade900),
       ),
-      child: Row(
+      child: Column(
         children: <Widget>[
-          Expanded(
-            child: Column(
-              children: <Widget>[
-                Text(
-                  session.homeTeam.abbreviation,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  session.homeTeam.name,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 11, color: AppTheme.textDim),
-                ),
-              ],
+          Text(
+            competitionLabel.toUpperCase(),
+            style: const TextStyle(
+              fontSize: 10,
+              letterSpacing: .7,
+              color: AppTheme.textDim,
+              fontWeight: FontWeight.bold,
             ),
           ),
-          Column(
+          const SizedBox(height: 8),
+          Row(
             children: <Widget>[
-              Text(
-                '$homeGoals - $awayGoals',
-                style: const TextStyle(
-                  fontSize: 34,
-                  fontWeight: FontWeight.w900,
+              Expanded(
+                child: Column(
+                  children: <Widget>[
+                    Text(
+                      session.homeTeam.abbreviation,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      session.homeTeam.name,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textDim,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              if (displayedMinute >= 90 && session.decidedOnPenalties)
-                Text(
-                  'Pens ${_shootoutScore(session, true)}-'
-                  '${_shootoutScore(session, false)}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.warn,
+              Column(
+                children: <Widget>[
+                  Text(
+                    '$homeGoals - $awayGoals',
+                    style: const TextStyle(
+                      fontSize: 34,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                ),
-              Text(
-                '$displayedMinute\'',
-                style: TextStyle(
-                  color: AppTheme.accent,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
+                  if (displayedMinute >= 90 && session.decidedOnPenalties)
+                    Text(
+                      'Pens ${_shootoutScore(session, true)}-'
+                      '${_shootoutScore(session, false)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.warn,
+                      ),
+                    ),
+                  Text(
+                    '$displayedMinute\'',
+                    style: TextStyle(
+                      color: AppTheme.accent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              Expanded(
+                child: Column(
+                  children: <Widget>[
+                    Text(
+                      session.awayTeam.abbreviation,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      session.awayTeam.name,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textDim,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
-          ),
-          Expanded(
-            child: Column(
-              children: <Widget>[
-                Text(
-                  session.awayTeam.abbreviation,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  session.awayTeam.name,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 11, color: AppTheme.textDim),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -370,6 +400,7 @@ class _MatchScreenState extends State<MatchScreen> {
                               matches: game.lastMatchday,
                               teams: game.lastMatchdayTeams,
                               userTeamId: game.userTeamId,
+                              competitionLabel: game.competitionLabel,
                               date: session.match.date,
                             );
                             if (mounted) Navigator.of(context).pop();

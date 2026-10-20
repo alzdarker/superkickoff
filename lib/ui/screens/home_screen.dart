@@ -148,6 +148,7 @@ class _HomeScreenState extends State<HomeScreen> {
         matches: game.lastMatchday,
         teams: game.lastMatchdayTeams,
         userTeamId: game.userTeamId,
+        competitionLabel: game.competitionLabel,
         date: game.lastMatchday.isEmpty ? null : game.lastMatchday.first.date,
       );
     }
@@ -237,6 +238,16 @@ class OverviewTab extends StatelessWidget {
               ],
             ),
             const Divider(height: 20),
+            if (game.nextUserMatch != null)
+              Text(
+                game.competitionLabel(game.nextUserMatch!).toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 10,
+                  letterSpacing: .7,
+                  color: AppTheme.textDim,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             if (game.nextUserMatch != null && opponent != null)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -310,6 +321,7 @@ class OverviewTab extends StatelessWidget {
                             matches: provider.lastMatchday,
                             teams: provider.lastMatchdayTeams,
                             userTeamId: provider.userTeamId,
+                            competitionLabel: provider.competitionLabel,
                             date: provider.lastMatchday.isEmpty
                                 ? null
                                 : provider.lastMatchday.first.date,

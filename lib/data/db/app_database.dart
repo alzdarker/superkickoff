@@ -70,6 +70,36 @@ class AppDatabase {
         sessions INTEGER NOT NULL DEFAULT 0
       )
     ''');
+    await db.execute('''
+      UPDATE teams
+      SET abbreviation = CASE name
+        WHEN 'Persija' THEN 'PSJ'
+        WHEN 'Persebaya' THEN 'PSB'
+        WHEN 'Persijap' THEN 'PSJ'
+        WHEN 'Persib' THEN 'PSB'
+        WHEN 'Persik' THEN 'PSK'
+        WHEN 'Persis' THEN 'PSS'
+        WHEN 'Persita' THEN 'PST'
+        WHEN 'Persekat' THEN 'PKT'
+        WHEN 'Persiraja' THEN 'PSR'
+        WHEN 'Persela' THEN 'PSL'
+        WHEN 'Persiba' THEN 'PSB'
+        WHEN 'Persiku' THEN 'PKU'
+        WHEN 'Persipal' THEN 'PSP'
+        WHEN 'Persipura' THEN 'PSP'
+        WHEN 'Persipa' THEN 'PSP'
+        WHEN 'Persibo' THEN 'PSB'
+        WHEN 'Persikabo 1973' THEN 'PKB'
+        WHEN 'Persikota' THEN 'PKT'
+        WHEN 'Persewar' THEN 'PSW'
+        WHEN 'Perserang' THEN 'PSR'
+        WHEN 'Persekabpas' THEN 'PKP'
+        WHEN 'Persikutim United' THEN 'PKU'
+        WHEN 'Persikad' THEN 'PKD'
+      END
+      WHERE country_id = (SELECT country_id FROM countries WHERE name = 'Indonesia')
+        AND abbreviation = 'Per'
+    ''');
   }
 
   /// Test/dev helper: open an arbitrary file directly.
