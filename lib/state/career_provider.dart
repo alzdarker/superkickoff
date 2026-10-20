@@ -387,10 +387,12 @@ class CareerProvider extends ChangeNotifier {
   }
 
   String competitionLabel(FixtureMatch match) {
-    if (match.tournamentId == league?.tournamentId) return 'League';
+    if (match.tournamentId == league?.tournamentId) {
+      return league?.name ?? 'League';
+    }
     for (final Tournament tournament in cups) {
       if (tournament.tournamentId == match.tournamentId) {
-        return tournament.isInternational ? 'Intercontinental' : 'Domestic Cup';
+        return tournament.name;
       }
     }
     return 'Cup';

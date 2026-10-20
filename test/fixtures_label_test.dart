@@ -15,7 +15,7 @@ void main() {
     expect(knockoutTotalRounds(const <FixtureMatch>[]), 1);
   });
 
-  test('labels league, domestic cup and intercontinental fixtures', () {
+  test('labels fixtures with their competition names', () {
     final CareerProvider game = CareerProvider()
       ..league = Tournament.fromMap(<String, Object?>{
         'tournament_id': 1,
@@ -25,12 +25,12 @@ void main() {
       ..cups = <Tournament>[
         Tournament.fromMap(<String, Object?>{
           'tournament_id': 2,
-          'name': 'Cup',
+          'name': 'FA Cup',
           'organization': DbOrg.orgNationalCup,
         }),
         Tournament.fromMap(<String, Object?>{
           'tournament_id': 3,
-          'name': 'Continental Cup',
+          'name': 'AFC Champions League',
           'organization': DbOrg.orgInternational,
         }),
       ];
@@ -45,8 +45,8 @@ void main() {
         });
 
     expect(game.competitionLabel(fixture(1)), 'League');
-    expect(game.competitionLabel(fixture(2)), 'Domestic Cup');
-    expect(game.competitionLabel(fixture(3)), 'Intercontinental');
+    expect(game.competitionLabel(fixture(2)), 'FA Cup');
+    expect(game.competitionLabel(fixture(3)), 'AFC Champions League');
   });
 
   testWidgets('knockout bracket scrolls a long opening round', (
