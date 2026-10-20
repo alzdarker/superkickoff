@@ -706,4 +706,11 @@ class LiveMatchSession {
   final MatchResult result;
   final Team homeTeam;
   final Team awayTeam;
+
+  /// Shootout kicks once a knockout tie ended level after 90 minutes.
+  List<MatchEvent> get shootoutEvents => result.events
+      .where((MatchEvent e) => e.type == MatchEvent.shootout)
+      .toList();
+
+  bool get decidedOnPenalties => shootoutEvents.isNotEmpty;
 }

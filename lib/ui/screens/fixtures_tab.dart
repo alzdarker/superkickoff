@@ -147,16 +147,27 @@ class _FixturesTabState extends State<FixturesTab> {
             ),
           ),
           Container(
-            width: 62,
+            width: 66,
             alignment: Alignment.center,
             margin: const EdgeInsets.symmetric(horizontal: 8),
-            child: Text(
-              played ? '${m.homeGoals ?? 0} - ${m.awayGoals ?? 0}' : 'vs',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: played ? 14 : 11,
-                color: played ? Colors.white : AppTheme.textDim,
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  played ? '${m.homeGoals ?? 0} - ${m.awayGoals ?? 0}' : 'vs',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: played ? 14 : 11,
+                    color: played ? Colors.white : AppTheme.textDim,
+                  ),
+                ),
+                if ((m.penaltyHomeGoals ?? 0) > 0 ||
+                    (m.penaltyAwayGoals ?? 0) > 0)
+                  Text(
+                    'pens ${m.penaltyHomeGoals}-${m.penaltyAwayGoals}',
+                    style: const TextStyle(fontSize: 8, color: AppTheme.warn),
+                  ),
+              ],
             ),
           ),
           Expanded(

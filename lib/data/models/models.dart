@@ -239,6 +239,8 @@ class FixtureMatch {
     required this.awayGoals,
     required this.winnerId,
     this.groupId,
+    this.penaltyHomeGoals,
+    this.penaltyAwayGoals,
   });
 
   final int matchId;
@@ -257,6 +259,10 @@ class FixtureMatch {
   final int? awayGoals;
   final int? winnerId;
 
+  /// Shootout score when a knockout tie was level after 90 minutes.
+  final int? penaltyHomeGoals;
+  final int? penaltyAwayGoals;
+
   bool get isPlayed => status == DbMatch.matchFinished;
   bool get isScheduled => status == DbMatch.matchScheduled;
 
@@ -266,6 +272,8 @@ class FixtureMatch {
     round: (m['round'] as int?) ?? 0,
     phase: (m['phase'] as int?) ?? 0,
     groupId: m['group_id'] as int?,
+    penaltyHomeGoals: (m['penalty_home_goals'] as int?) ?? 0,
+    penaltyAwayGoals: (m['penalty_away_goals'] as int?) ?? 0,
     status: (m['status'] as int?) ?? 1,
     homeTeamId: m['home_team_id'] as int,
     awayTeamId: m['away_team_id'] as int,

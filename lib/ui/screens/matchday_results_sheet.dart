@@ -163,9 +163,22 @@ class _MatchdayResultsSheet extends StatelessWidget {
             width: 62,
             alignment: Alignment.center,
             margin: const EdgeInsets.symmetric(horizontal: 8),
-            child: Text(
-              '${match.homeGoals ?? 0} - ${match.awayGoals ?? 0}',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            child: Column(
+              children: <Widget>[
+                Text(
+                  '${match.homeGoals ?? 0} - ${match.awayGoals ?? 0}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                if ((match.penaltyHomeGoals ?? 0) > 0 ||
+                    (match.penaltyAwayGoals ?? 0) > 0)
+                  Text(
+                    'pens ${match.penaltyHomeGoals}-${match.penaltyAwayGoals}',
+                    style: const TextStyle(fontSize: 9, color: AppTheme.warn),
+                  ),
+              ],
             ),
           ),
           Expanded(

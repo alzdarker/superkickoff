@@ -260,5 +260,72 @@ void main() {
       );
       expect(result.events, isEmpty);
     });
+
+    test('shootout always produces a winner with alternating kicks', () {
+      for (int seed = 1; seed <= 25; seed++) {
+        final MatchPenaltyShootout shootout = MatchEngine(random: Random(seed))
+            .penaltyShootout(
+              MatchInput(
+                homeSquad: buildSquad(3),
+                awaySquad: buildSquad(4),
+                capacityGeneral: 1000,
+                capacityStand: 500,
+                capacityTerrace: 200,
+                capacityBoxes: 50,
+                homePower: 70,
+              ),
+            );
+        expect(
+          shootout.homeScore == shootout.awayScore,
+          isFalse,
+          reason: 'a shootout can never end level',
+        );
+        expect(shootout.events.length, greaterThanOrEqualTo(6));
+        expect(
+          shootout.events.every(
+            (MatchEvent e) =>
+                e.type == MatchEvent.shootout &&
+                (e.detail == null ||
+                    e.detail!.startsWith('scored') ||
+                    e.detail!.startsWith('missed')),
+          ),
+          isTrue,
+        );
+        // Kicks alternate home, away, home, away... unless the best-of-five
+        // ends early, which always stops right after an away kick.
+        final int fullRounds = shootout.events.length >= 10
+            ? shootout.events.length - (shootout.events.length % 2)
+            : shootout.events.length;
+        for (int i = 0; i < fullRounds; i++) {
+          expect(shootout.events[i].isHome, i.isEven);
+        }
+      }
+    });
+
+    test('shootout score matches the kick events', () {
+      for (int seed = 1; seed <= 10; seed++) {
+        final MatchPenaltyShootout shootout = MatchEngine(random: Random(seed))
+            .penaltyShootout(
+              MatchInput(
+                homeSquad: buildSquad(11),
+                awaySquad: buildSquad(12),
+                capacityGeneral: 0,
+                capacityStand: 0,
+                capacityTerrace: 0,
+                capacityBoxes: 0,
+                homePower: 60,
+              ),
+            );
+        int scored(bool home) => shootout.events
+            .where(
+              (MatchEvent e) =>
+                  e.isHome == home &&
+                  e.detail == 'scored ${e.detail!.split(' ').last}',
+            )
+            .length;
+        expect(scored(true), shootout.homeScore);
+        expect(scored(false), shootout.awayScore);
+      }
+    });
   });
 }

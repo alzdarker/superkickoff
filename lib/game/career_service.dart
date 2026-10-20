@@ -195,14 +195,18 @@ class CareerService {
         : (result.awayGoals > result.homeGoals ? match.awayTeamId : null);
     int? penaltyHome;
     int? penaltyAway;
+    List<MatchEvent> events = result.events;
     // Knockout ties cannot end level: decide them with a shootout.
     if (winnerId == null && await _isKnockout(match.tournamentId)) {
-      final bool homeWins = _rng.nextDouble() < 0.52;
-      winnerId = homeWins ? match.homeTeamId : match.awayTeamId;
-      final int winnerScore = 4 + _rng.nextInt(2);
-      final int loserScore = 2 + _rng.nextInt(2);
-      penaltyHome = homeWins ? winnerScore : loserScore;
-      penaltyAway = homeWins ? loserScore : winnerScore;
+      final MatchPenaltyShootout shootout = _engine.penaltyShootout(
+        result.input,
+      );
+      penaltyHome = shootout.homeScore;
+      penaltyAway = shootout.awayScore;
+      winnerId = shootout.homeScore > shootout.awayScore
+          ? match.homeTeamId
+          : match.awayTeamId;
+      events = <MatchEvent>[...result.events, ...shootout.events];
     }
     await _matchRepo.saveResult(
       matchId: match.matchId,
@@ -216,7 +220,7 @@ class CareerService {
       attendanceTerrace: result.attendanceTerrace,
       attendanceBoxes: result.attendanceBoxes,
       revenue: result.revenue,
-      events: result.events.map((MatchEvent e) => e.toMap()).toList(),
+      events: events.map((MatchEvent e) => e.toMap()).toList(),
       playerRows: result.playerRows.map(_playerRowToDb).toList(),
       injuredPlayerIds: result.events
           .where((MatchEvent e) => e.type == MatchEvent.injury)

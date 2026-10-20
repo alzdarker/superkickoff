@@ -82,6 +82,9 @@ class _MatchScreenState extends State<MatchScreen> {
     final List<MatchEvent> shown = session.result.events
         .where((MatchEvent e) => e.minute <= displayedMinute)
         .toList();
+    final List<MatchEvent> kicks = displayedMinute >= 90
+        ? session.shootoutEvents
+        : <MatchEvent>[];
     final bool finished = displayedMinute >= 90;
 
     return Scaffold(
@@ -90,11 +93,12 @@ class _MatchScreenState extends State<MatchScreen> {
         children: <Widget>[
           _scoreBoard(session, homeGoals, awayGoals),
           Expanded(
-            child: ListView.builder(
+            child: ListView(
               padding: const EdgeInsets.all(12),
-              itemCount: shown.length,
-              itemBuilder: (BuildContext context, int index) =>
-                  _eventTile(shown[index], session),
+              children: <Widget>[
+                for (final MatchEvent e in shown) _eventTile(e, session),
+                if (kicks.isNotEmpty) _shootoutSection(session, kicks),
+              ],
             ),
           ),
           _controls(finished, session, game),
@@ -158,6 +162,16 @@ class _MatchScreenState extends State<MatchScreen> {
                   fontWeight: FontWeight.w900,
                 ),
               ),
+              if (displayedMinute >= 90 && session.decidedOnPenalties)
+                Text(
+                  'Pens ${_shootoutScore(session, true)}-'
+                  '${_shootoutScore(session, false)}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.warn,
+                  ),
+                ),
               Text(
                 '$displayedMinute\'',
                 style: TextStyle(
@@ -189,6 +203,57 @@ class _MatchScreenState extends State<MatchScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  int _shootoutScore(LiveMatchSession session, bool home) {
+    int score = 0;
+    for (final MatchEvent e in session.shootoutEvents) {
+      if (e.isHome == home && e.detail?.startsWith('scored') == true) score++;
+    }
+    return score;
+  }
+
+  /// Penalty shootout kicks listed after normal time.
+  Widget _shootoutSection(LiveMatchSession session, List<MatchEvent> kicks) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const Padding(
+          padding: EdgeInsets.fromLTRB(4, 16, 4, 6),
+          child: Text(
+            'PENALTY SHOOTOUT',
+            style: TextStyle(
+              fontSize: 10,
+              letterSpacing: 1,
+              color: AppTheme.textDim,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        for (final MatchEvent e in kicks)
+          ListTile(
+            dense: true,
+            leading: Icon(
+              e.detail?.startsWith('scored') == true
+                  ? Icons.check_circle
+                  : Icons.cancel,
+              size: 18,
+              color: e.detail?.startsWith('scored') == true
+                  ? AppTheme.accent
+                  : AppTheme.danger,
+            ),
+            title: Text(
+              '${e.playerName ?? 'Taker'}  ·  '
+              '${e.detail?.startsWith('scored') == true ? 'scored' : 'missed'}',
+              style: const TextStyle(fontSize: 13),
+            ),
+            trailing: Text(
+              (e.isHome ? session.homeTeam : session.awayTeam).abbreviation,
+              style: const TextStyle(color: AppTheme.textDim, fontSize: 11),
+            ),
+          ),
+      ],
     );
   }
 
@@ -262,7 +327,16 @@ class _MatchScreenState extends State<MatchScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: <Widget>[
-                      statChip('Final score', 'FT', color: AppTheme.accent),
+                      statChip(
+                        session.decidedOnPenalties
+                            ? 'Penalties'
+                            : 'Final score',
+                        session.decidedOnPenalties
+                            ? '${_shootoutScore(session, true)}-'
+                                  '${_shootoutScore(session, false)}'
+                            : 'FT',
+                        color: AppTheme.accent,
+                      ),
                       const SizedBox(width: 16),
                       statChip(
                         'Revenue',

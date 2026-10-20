@@ -294,6 +294,9 @@ class MatchEvent {
   static const String subOut = 'substitution_out';
   static const String varCheck = 'var_check';
   static const String varGoalDisallowed = 'var_goal_disallowed';
+
+  /// Shootout kick, `detail` holds `scored` or `missed`.
+  static const String shootout = 'shootout_kick';
 }
 
 /// Per-player row persisted into match_players.
@@ -381,10 +384,12 @@ class MatchResult {
     required this.homeSaves,
     required this.awaySaves,
     required this.homePossession,
+    required this.input,
   });
 
   final int homeGoals;
   final int awayGoals;
+  final MatchInput input;
   final List<MatchEvent> events;
   final List<MatchPlayerRow> playerRows;
   final int attendanceGeneral;
@@ -401,6 +406,19 @@ class MatchResult {
   final int homeSaves;
   final int awaySaves;
   final int homePossession;
+}
+
+/// Outcome of a knockout penalty shootout.
+class MatchPenaltyShootout {
+  const MatchPenaltyShootout({
+    required this.homeScore,
+    required this.awayScore,
+    required this.events,
+  });
+
+  final int homeScore;
+  final int awayScore;
+  final List<MatchEvent> events;
 }
 
 /// The match engine: pure Dart, no DB or UI dependency so it runs inside
@@ -995,7 +1013,90 @@ class MatchEngine {
       homeSaves: homeSaves,
       awaySaves: awaySaves,
       homePossession: homePossession,
+      input: input,
     );
+  }
+
+  /// Runs a penalty shootout between two clubs. `detail` on each event is
+  /// `scored`/`missed`; minutes stay at 120 so the viewer shows them after
+  /// full time. Sudden death follows when the first five kicks each end level.
+  MatchPenaltyShootout penaltyShootout(MatchInput input) {
+    final Lineup home = Lineup.best(
+      input.homeSquad,
+      formation: input.homeFormation,
+      preferredIds: input.homeLineupIds,
+    );
+    final Lineup away = Lineup.best(
+      input.awaySquad,
+      formation: input.awayFormation,
+      preferredIds: input.awayLineupIds,
+    );
+    final List<Player> homeKickers = _shootoutKickers(home.starters);
+    final List<Player> awayKickers = _shootoutKickers(away.starters);
+    final List<MatchEvent> events = <MatchEvent>[];
+    int homeScore = 0;
+    int awayScore = 0;
+    int round = 1;
+
+    // Best of five first, then sudden death until somebody leads.
+    while (true) {
+      final bool suddenDeath = round > 5;
+      for (final bool isHome in <bool>[true, false]) {
+        final Player shooter = isHome
+            ? homeKickers[(round - 1) % homeKickers.length]
+            : awayKickers[(round - 1) % awayKickers.length];
+        final bool scored = _rng.nextDouble() < 0.76;
+        if (scored) {
+          if (isHome) {
+            homeScore++;
+          } else {
+            awayScore++;
+          }
+        }
+        events.add(
+          MatchEvent(
+            minute: 120,
+            type: MatchEvent.shootout,
+            side: isHome ? 'home' : 'away',
+            playerId: shooter.playerId,
+            playerName: shooter.name,
+            detail: '${scored ? 'scored' : 'missed'} $round',
+          ),
+        );
+        // Best of five can end early once the result is mathematically safe.
+        if (!suddenDeath) {
+          final int kicksTaken = isHome ? round : round - 1;
+          final int kicksLeft = 5 - kicksTaken;
+          if (homeScore > awayScore + kicksLeft ||
+              awayScore > homeScore + kicksLeft) {
+            return MatchPenaltyShootout(
+              homeScore: homeScore,
+              awayScore: awayScore,
+              events: events,
+            );
+          }
+        }
+      }
+      if (suddenDeath && homeScore != awayScore) {
+        return MatchPenaltyShootout(
+          homeScore: homeScore,
+          awayScore: awayScore,
+          events: events,
+        );
+      }
+      round++;
+    }
+  }
+
+  /// Kickers by finishing skill, best penalty takers first.
+  List<Player> _shootoutKickers(List<Player> starters) {
+    final List<Player> outfield =
+        starters.where((Player p) => p.positionId != 1).toList()
+          ..sort((Player a, Player b) => b.power.compareTo(a.power));
+    final List<Player> keeper = starters
+        .where((Player p) => p.positionId == 1)
+        .toList();
+    return <Player>[...outfield, ...keeper];
   }
 
   static double tempsFactor(int temper) => 0.6 + 0.2 * temper;
