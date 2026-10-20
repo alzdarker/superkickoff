@@ -58,6 +58,9 @@ class CareerProvider extends ChangeNotifier {
   List<FixtureMatch> lastMatchday = <FixtureMatch>[];
   Map<int, Team> lastMatchdayTeams = <int, Team>{};
   List<StandingRow> standings = <StandingRow>[];
+
+  /// Group tables of continental cups, keyed by tournament id.
+  Map<int, List<GroupTable>> cupGroups = <int, List<GroupTable>>{};
   List<LeaderRow> topScorers = <LeaderRow>[];
   List<LeaderRow> topAssists = <LeaderRow>[];
   List<LeaderRow> topCleanSheets = <LeaderRow>[];
@@ -330,6 +333,16 @@ class CareerProvider extends ChangeNotifier {
       final int seasonId = season!.seasonId;
       final int tournamentId = league!.tournamentId;
       standings = await _seasons.standings(seasonId, tournamentId);
+      final Map<int, List<GroupTable>> groups = <int, List<GroupTable>>{};
+      for (final Tournament tour in cups) {
+        if (!tour.isInternational) continue;
+        final List<GroupTable> tables = await _seasons.groupTables(
+          seasonId,
+          tour.tournamentId,
+        );
+        if (tables.isNotEmpty) groups[tour.tournamentId] = tables;
+      }
+      cupGroups = groups;
       topScorers = await _seasons.topScorers(seasonId, tournamentId);
       topAssists = await _seasons.topAssists(seasonId, tournamentId);
       topCleanSheets = await _seasons.topCleanSheets(seasonId, tournamentId);
@@ -523,6 +536,20 @@ class CareerProvider extends ChangeNotifier {
   Future<ClubOverview?> clubOverview() => _squads.clubOverview(userTeamId);
 
   Future<List<ClubTrophy>> clubTrophies() => _seasons.clubTrophies(userTeamId);
+
+  /// Archived-season browsing used by the Table tab history screen.
+  Future<List<Season>> allSeasons() => _seasons.allSeasons();
+
+  Future<List<Tournament>> competitionsForSeason(int seasonId) =>
+      _seasons.tournamentsForSeason(seasonId);
+
+  Future<List<StandingRow>> standingsForSeason(
+    int seasonId,
+    int tournamentId,
+  ) => _seasons.standings(seasonId, tournamentId);
+
+  Future<List<GroupTable>> groupsForSeason(int seasonId, int tournamentId) =>
+      _seasons.groupTables(seasonId, tournamentId);
 
   Future<ClubHistory> clubHistory() async {
     final List<CareerSeason> seasons = await _seasons.careerHistory(userTeamId);

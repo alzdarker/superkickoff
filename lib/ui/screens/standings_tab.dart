@@ -6,6 +6,7 @@ import '../../state/career_provider.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'player_detail_sheet.dart';
+import 'season_history_sheet.dart';
 
 /// League table plus season leaderboards (scorers, assists, clean sheets and
 /// average match rating).
@@ -29,6 +30,16 @@ class StandingsTab extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Season history',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.history, size: 20),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const SeasonHistoryScreen(),
                     ),
                   ),
                 ),
@@ -101,10 +112,19 @@ class StandingsTab extends StatelessWidget {
   }
 }
 
-class _LeagueTable extends StatelessWidget {
+class _LeagueTable extends StatefulWidget {
   const _LeagueTable({required this.game});
 
   final CareerProvider game;
+
+  @override
+  State<_LeagueTable> createState() => _LeagueTableState();
+}
+
+class _LeagueTableState extends State<_LeagueTable> {
+  int? _selectedId;
+
+  CareerProvider get game => widget.game;
 
   static const double _rankWidth = 30;
   static const double _statWidth = 26;
@@ -119,6 +139,58 @@ class _LeagueTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final List<Tournament> options = <Tournament>[
+      if (game.league != null) game.league!,
+      ...game.cups.where(
+        (Tournament tour) =>
+            tour.isInternational &&
+            (game.cupGroups[tour.tournamentId]?.isNotEmpty ?? false),
+      ),
+    ];
+    final int leagueId = game.league?.tournamentId ?? 0;
+    if (options.isEmpty) {
+      return const Center(child: Text('No table available.'));
+    }
+    final int selectedId =
+        options.any((Tournament tour) => tour.tournamentId == _selectedId)
+        ? _selectedId!
+        : leagueId != 0
+        ? leagueId
+        : options.first.tournamentId;
+    return Column(
+      children: <Widget>[
+        if (options.length > 1) _selector(options, selectedId),
+        Expanded(
+          child: selectedId == leagueId
+              ? _leagueBody()
+              : _groupBody(game.cupGroups[selectedId] ?? const <GroupTable>[]),
+        ),
+      ],
+    );
+  }
+
+  Widget _selector(List<Tournament> options, int selectedId) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+    alignment: Alignment.centerLeft,
+    child: DropdownButtonHideUnderline(
+      child: DropdownButton<int>(
+        value: selectedId,
+        isDense: true,
+        dropdownColor: AppTheme.surfaceCard,
+        style: const TextStyle(fontSize: 12, color: Colors.white),
+        items: <DropdownMenuItem<int>>[
+          for (final Tournament tour in options)
+            DropdownMenuItem<int>(
+              value: tour.tournamentId,
+              child: Text(tour.name),
+            ),
+        ],
+        onChanged: (int? id) => setState(() => _selectedId = id),
+      ),
+    ),
+  );
+
+  Widget _leagueBody() {
     final List<StandingRow> rows = game.standings;
     if (rows.isEmpty) {
       return const Center(
@@ -136,6 +208,30 @@ class _LeagueTable extends StatelessWidget {
                 _row(game, rows[index], index),
           ),
         ),
+      ],
+    );
+  }
+
+  Widget _groupBody(List<GroupTable> groups) {
+    if (groups.isEmpty) {
+      return const Center(child: Text('No group stage for this cup.'));
+    }
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 20),
+      children: <Widget>[
+        for (int i = 0; i < groups.length; i++) ...<Widget>[
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+            color: AppTheme.surfaceCard,
+            child: Text(
+              'Group ${String.fromCharCode(65 + i)}',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+          ),
+          _header(),
+          for (int r = 0; r < groups[i].rows.length; r++)
+            _row(game, groups[i].rows[r], r, groupStage: true),
+        ],
       ],
     );
   }
@@ -179,11 +275,18 @@ class _LeagueTable extends StatelessWidget {
         ),
       );
 
-  Widget _row(CareerProvider game, StandingRow row, int index) {
+  Widget _row(
+    CareerProvider game,
+    StandingRow row,
+    int index, {
+    bool groupStage = false,
+  }) {
     final bool isUser = row.teamId == game.userTeamId;
-    final bool promotion =
-        game.league != null && index < game.league!.promotionSlots;
+    final bool promotion = groupStage
+        ? index < 2
+        : game.league != null && index < game.league!.promotionSlots;
     final bool relegation =
+        !groupStage &&
         game.league != null &&
         game.league!.relegationSpots > 0 &&
         index >= game.standings.length - game.league!.relegationSpots;

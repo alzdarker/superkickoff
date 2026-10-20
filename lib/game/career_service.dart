@@ -431,6 +431,41 @@ class CareerService {
       cupTournamentId,
     );
     if (remaining != 0) return false;
+
+    // Group-stage competitions: once every group match is played, the top
+    // two clubs of each group enter the knockout bracket.
+    final List<GroupTable> groups = await _seasons.groupTables(
+      seasonId,
+      cupTournamentId,
+    );
+    if (groups.isNotEmpty) {
+      final int? knockoutMatches = Sqflite.firstIntValue(
+        await db.rawQuery(
+          '''
+          SELECT COUNT(*) FROM matches
+          WHERE season_id = ? AND tournament_id = ? AND group_id IS NULL
+        ''',
+          <Object?>[seasonId, cupTournamentId],
+        ),
+      );
+      if ((knockoutMatches ?? 0) == 0) {
+        final List<int> qualified = <int>[
+          for (final GroupTable group in groups)
+            for (final StandingRow row in group.rows.take(2)) row.teamId,
+        ];
+        if (qualified.length < 2) return false;
+        final int scheduled = await _gen.scheduleCupRound(
+          seasonId,
+          cupTournamentId,
+          qualified,
+          phase: 1,
+          date: await _nextCupDate(seasonId, cupTournamentId),
+          allTeams: teamCache,
+        );
+        return scheduled > 0;
+      }
+    }
+
     final rows = await db.rawQuery(
       '''
       SELECT winner_id FROM matches
@@ -463,12 +498,26 @@ class CareerService {
         ? null
         : rowsMax.first['max_phase'] as int?;
     if (maxPhase == null) return false;
+    final DateTime date = await _nextCupDate(seasonId, cupTournamentId);
+    final int scheduled = await _gen.scheduleCupRound(
+      seasonId,
+      cupTournamentId,
+      survivors,
+      phase: maxPhase + 1,
+      date: date,
+      allTeams: teamCache,
+    );
+    return scheduled > 0;
+  }
+
+  /// Wednesday after the latest fixture of a cup.
+  Future<DateTime> _nextCupDate(int seasonId, int tournamentId) async {
     final List<Map<String, Object?>> lastDateRows = await db.rawQuery(
       '''
       SELECT MAX(date) AS last_date FROM matches
       WHERE season_id = ? AND tournament_id = ?
     ''',
-      <Object?>[seasonId, cupTournamentId],
+      <Object?>[seasonId, tournamentId],
     );
     final String? lastDate = lastDateRows.isEmpty
         ? null
@@ -485,16 +534,7 @@ class CareerService {
         : (seasonRows.first['start_year'] as int? ?? 2025);
     final DateTime base =
         DateTime.tryParse(lastDate ?? '') ?? DateTime(startYear, 8, 9);
-    final DateTime date = _nextWednesday(base.add(const Duration(days: 8)));
-    final int scheduled = await _gen.scheduleCupRound(
-      seasonId,
-      cupTournamentId,
-      survivors,
-      phase: maxPhase + 1,
-      date: date,
-      allTeams: teamCache,
-    );
-    return scheduled > 0;
+    return _nextWednesday(base.add(const Duration(days: 8)));
   }
 
   DateTime _nextWednesday(DateTime from) {
@@ -685,26 +725,61 @@ class CareerService {
     List<StandingRow> table,
   ) async {
     if (table.isEmpty) return;
-    // Promote the top N (their division moves up: 2 -> 1).
-    for (int i = 0; i < min(table.length, tour.promotionSlots); i++) {
-      final StandingRow row = table[i];
-      if (tour.divisionId > 1) {
-        await db.execute(
-          'UPDATE teams SET division = division - 1 WHERE team_id = ? AND division > 1',
-          <Object?>[row.teamId],
-        );
-      }
+    final countryRows = await db.query(
+      t.tournamentCountries,
+      columns: <String>['country_id'],
+      where: 'tournament_id = ?',
+      whereArgs: <Object?>[tour.tournamentId],
+      limit: 1,
+    );
+    if (countryRows.isEmpty) return;
+    final int countryId = countryRows.first['country_id'] as int;
+
+    // Count the division below first: a league may only send clubs down when
+    // that division can send replacements up, otherwise it shrinks forever.
+    final int? lowerCount = Sqflite.firstIntValue(
+      await db.rawQuery(
+        'SELECT COUNT(*) FROM teams WHERE country_id = ? AND division = ?',
+        <Object?>[countryId, tour.divisionId + 1],
+      ),
+    );
+    final int lowerTeams = lowerCount ?? 0;
+    final int relegated = min(tour.relegationSpots, lowerTeams);
+    final int promoted = tour.divisionId > 1
+        ? min(tour.promotionSlots, lowerTeams - relegated)
+        : 0;
+    final int incoming = relegated + promoted;
+    if (incoming == 0) return;
+
+    // Clubs from the division below were not simulated, so the strongest
+    // ones take the vacated places.
+    final lowerRows = await db.query(
+      t.teams,
+      columns: <String>['team_id'],
+      where: 'country_id = ? AND division = ?',
+      whereArgs: <Object?>[countryId, tour.divisionId + 1],
+      orderBy: 'power DESC',
+      limit: incoming,
+    );
+    for (final Map<String, Object?> row in lowerRows) {
+      await db.execute(
+        'UPDATE teams SET division = division - 1 WHERE team_id = ?',
+        <Object?>[row['team_id']],
+      );
     }
-    // Relegate the bottom M (their division moves down).
-    for (
-      int i = max(0, table.length - tour.relegationSpots);
-      i < table.length;
-      i++
-    ) {
-      final StandingRow row = table[i];
+
+    // Promote the best clubs of this league up one division.
+    for (int i = 0; i < promoted; i++) {
+      await db.execute(
+        'UPDATE teams SET division = division - 1 WHERE team_id = ? AND division > 1',
+        <Object?>[table[i].teamId],
+      );
+    }
+    // Relegate the bottom clubs.
+    for (int i = max(0, table.length - relegated); i < table.length; i++) {
       await db.execute(
         'UPDATE teams SET division = division + 1 WHERE team_id = ?',
-        <Object?>[row.teamId],
+        <Object?>[table[i].teamId],
       );
     }
   }

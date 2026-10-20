@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -46,21 +44,39 @@ class _FixturesTabState extends State<FixturesTab> {
       return const Center(child: Text('No fixtures yet'));
     }
     final int leagueId = game.league?.tournamentId ?? 0;
-    final Map<int, int> maxPhases = <int, int>{};
+    // Bracket size is fixed by the first knockout round, not by the last
+    // round that happens to be scheduled already. Counting the first round's
+    // ties keeps early fixtures labelled "Round of 32" instead of "Final".
+    final Map<int, int> firstPhases = <int, int>{};
+    final Map<int, int> firstPhaseCounts = <int, int>{};
     for (final FixtureMatch m in list) {
-      if (m.tournamentId == leagueId) continue;
-      maxPhases[m.tournamentId] = max(maxPhases[m.tournamentId] ?? 1, m.phase);
+      if (m.tournamentId == leagueId || m.groupId != null) continue;
+      final int? current = firstPhases[m.tournamentId];
+      if (current == null || m.phase < current) {
+        firstPhases[m.tournamentId] = m.phase;
+        firstPhaseCounts[m.tournamentId] = 1;
+      } else if (m.phase == current) {
+        firstPhaseCounts[m.tournamentId] =
+            (firstPhaseCounts[m.tournamentId] ?? 0) + 1;
+      }
     }
+    final Map<int, int> totalRounds = <int, int>{
+      for (final MapEntry<int, int> entry in firstPhaseCounts.entries)
+        entry.key: (entry.value * 2).bitLength - 1,
+    };
 
     // Group by tournament + round.
     final Map<String, List<FixtureMatch>> groups =
         <String, List<FixtureMatch>>{};
     for (final FixtureMatch m in list) {
       final bool isLeague = m.tournamentId == leagueId;
+      final String stage = m.groupId != null
+          ? 'Group ${String.fromCharCode(64 + m.groupId!)} · '
+                'Matchday ${m.round}'
+          : knockoutRoundName(m.phase, totalRounds[m.tournamentId] ?? 1);
       final String key = isLeague
           ? '${game.league?.name ?? 'League'} · Round ${m.round}'
-          : '${tournamentNames[m.tournamentId] ?? 'Cup'} · '
-                '${_phaseName(m.phase, maxPhases[m.tournamentId] ?? 1)}';
+          : '${tournamentNames[m.tournamentId] ?? 'Cup'} · $stage';
       groups.putIfAbsent(key, () => <FixtureMatch>[]).add(m);
     }
     final List<String> keys = groups.keys.toList();
@@ -176,13 +192,13 @@ class _FixturesTabState extends State<FixturesTab> {
     ];
     return '${d.day} ${months[d.month - 1]}';
   }
+}
 
-  /// Bracket rounds are labelled from the number of teams still involved, so
-  /// trimmed brackets (32, 16, 8 clubs...) still get the right round names.
-  static String _phaseName(int phase, int maxPhase) {
-    final int teamsLeft = 1 << (maxPhase - phase + 1);
-    if (teamsLeft <= 2) return 'Final';
-    if (teamsLeft == 4) return 'Semi-finals';
-    return 'Round of $teamsLeft';
-  }
+/// Bracket rounds are labelled from the number of teams still involved, so
+/// trimmed brackets (64, 32, 16, 8 clubs...) get the right round names.
+String knockoutRoundName(int phase, int totalRounds) {
+  final int teamsLeft = 1 << (totalRounds - phase + 1);
+  if (teamsLeft <= 2) return 'Final';
+  if (teamsLeft == 4) return 'Semi-finals';
+  return 'Round of $teamsLeft';
 }

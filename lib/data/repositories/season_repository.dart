@@ -22,6 +22,26 @@ class SeasonRepository {
     return rows.isEmpty ? null : Season.fromMap(rows.first);
   }
 
+  /// Every season of the save, newest first, including archived ones.
+  Future<List<Season>> allSeasons() async {
+    final rows = await db.query(t.seasons, orderBy: 'season_id DESC');
+    return rows.map(Season.fromMap).toList();
+  }
+
+  /// Competitions played in a season, active or archived.
+  Future<List<Tournament>> tournamentsForSeason(int seasonId) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT tu.* FROM season_tournaments st
+      JOIN tournaments tu ON tu.tournament_id = st.tournament_id
+      WHERE st.season_id = ?
+      ORDER BY tu.organization ASC, tu.tournament_id ASC
+    ''',
+      <Object?>[seasonId],
+    );
+    return rows.map(Tournament.fromMap).toList();
+  }
+
   Future<Season> insertSeason({
     required int startYear,
     required int endYear,
@@ -125,7 +145,16 @@ class SeasonRepository {
   }
 
   /// League standings computed from played matches of [tournamentId].
-  Future<List<StandingRow>> standings(int seasonId, int tournamentId) async {
+  /// Pass [groupId] to read a single group of a cup group stage.
+  Future<List<StandingRow>> standings(
+    int seasonId,
+    int tournamentId, {
+    int? groupId,
+  }) async {
+    final String groupFilter = groupId == null ? '' : ' AND group_id = ?';
+    final List<Object?> groupArgs = groupId == null
+        ? <Object?>[]
+        : <Object?>[groupId];
     final List<StandingRow> rows = <StandingRow>[];
     final Map<int, StandingRow> byTeam = <int, StandingRow>{};
     final teamRows = await db.rawQuery(
@@ -135,12 +164,20 @@ class SeasonRepository {
       JOIN teams tm ON tm.team_id = st.team_id
       WHERE st.season_id = ? AND st.team_id IN (
         SELECT home_team_id FROM matches
-        WHERE season_id = ? AND tournament_id = ?
+        WHERE season_id = ? AND tournament_id = ?$groupFilter
         UNION SELECT away_team_id FROM matches
-        WHERE season_id = ? AND tournament_id = ?
+        WHERE season_id = ? AND tournament_id = ?$groupFilter
       )
     ''',
-      <Object?>[seasonId, seasonId, tournamentId, seasonId, tournamentId],
+      <Object?>[
+        seasonId,
+        seasonId,
+        tournamentId,
+        ...groupArgs,
+        seasonId,
+        tournamentId,
+        ...groupArgs,
+      ],
     );
     for (final Map<String, Object?> r in teamRows) {
       final StandingRow row = StandingRow(
@@ -163,9 +200,9 @@ class SeasonRepository {
       SELECT home_team_id, away_team_id, home_goals, away_goals
       FROM matches
       WHERE season_id = ? AND tournament_id = ? AND status = ?
-        AND home_goals IS NOT NULL AND away_goals IS NOT NULL
+        AND home_goals IS NOT NULL AND away_goals IS NOT NULL$groupFilter
     ''',
-      <Object?>[seasonId, tournamentId, t.matchFinished],
+      <Object?>[seasonId, tournamentId, t.matchFinished, ...groupArgs],
     );
     for (final Map<String, Object?> m in matches) {
       final int home = m['home_team_id'] as int;
@@ -204,6 +241,29 @@ class SeasonRepository {
       return b.goalsFor.compareTo(a.goalsFor);
     });
     return rows;
+  }
+
+  /// Every group table of a tournament, ordered by group id.
+  Future<List<GroupTable>> groupTables(int seasonId, int tournamentId) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT DISTINCT group_id FROM matches
+      WHERE season_id = ? AND tournament_id = ? AND group_id IS NOT NULL
+      ORDER BY group_id
+    ''',
+      <Object?>[seasonId, tournamentId],
+    );
+    final List<GroupTable> tables = <GroupTable>[];
+    for (final Map<String, Object?> row in rows) {
+      final int groupId = row['group_id'] as int;
+      tables.add(
+        GroupTable(
+          groupId: groupId,
+          rows: await standings(seasonId, tournamentId, groupId: groupId),
+        ),
+      );
+    }
+    return tables;
   }
 
   // ------------------------------------------------------------ leaderboards

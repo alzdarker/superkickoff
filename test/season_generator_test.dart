@@ -6,7 +6,13 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:superkickoff/data/db/schema.dart' as t;
 import 'package:superkickoff/data/models/models.dart';
+import 'package:superkickoff/data/repositories/match_repository.dart';
+import 'package:superkickoff/data/repositories/message_repository.dart';
 import 'package:superkickoff/data/repositories/reference_repository.dart';
+import 'package:superkickoff/data/repositories/season_repository.dart';
+import 'package:superkickoff/data/repositories/squad_repository.dart';
+import 'package:superkickoff/game/career_service.dart';
+import 'package:superkickoff/game/match_engine.dart';
 import 'package:superkickoff/game/season_generator.dart';
 
 /// Integration test: generate a real 2025 season from the bundled database
@@ -254,6 +260,125 @@ void main() {
       );
       expect(fixtures, isNotEmpty);
     }
+  });
+
+  test('continental group stage qualifies two clubs per group', () async {
+    const int countryId = 94; // Indonesia: two AFC cups.
+    final Tournament league = Tournament.fromMap(
+      await findTournament(
+        countryId: countryId,
+        organization: t.orgLeague,
+        divisionId: 1,
+      ),
+    );
+    final Tournament cup = Tournament.fromMap(
+      await findTournament(
+        countryId: countryId,
+        organization: t.orgNationalCup,
+      ),
+    );
+    final ReferenceRepository refs = ReferenceRepository(db);
+    final List<Tournament> internationals = await refs.internationalCups(
+      countryId,
+    );
+    final SeasonGenerator generator = SeasonGenerator(db, random: Random(9));
+    final CareerPlan plan = await generator.generateCareer(
+      countryId: countryId,
+      league: league,
+      cup: cup,
+      internationals: internationals,
+    );
+    final int seasonId = plan.season.seasonId;
+    final Tournament continental = internationals.first;
+
+    final List<Map<String, Object?>> groupMatchRows = await db.query(
+      t.matches,
+      where: 'season_id = ? AND tournament_id = ?',
+      whereArgs: <Object?>[seasonId, continental.tournamentId],
+    );
+    expect(groupMatchRows, isNotEmpty);
+    expect(
+      groupMatchRows.every(
+        (Map<String, Object?> row) => row['group_id'] != null,
+      ),
+      isTrue,
+      reason: 'continental fixtures start with a group stage',
+    );
+    final SeasonRepository seasons = SeasonRepository(db);
+    final List<GroupTable> groups = await seasons.groupTables(
+      seasonId,
+      continental.tournamentId,
+    );
+    expect(groups.length, greaterThanOrEqualTo(2));
+    for (final GroupTable group in groups) {
+      expect(group.rows.length, 4);
+      expect(
+        groupMatchRows
+            .where(
+              (Map<String, Object?> row) => row['group_id'] == group.groupId,
+            )
+            .length,
+        12,
+        reason: 'four clubs play a double round robin',
+      );
+    }
+
+    // Finish every group match, then let the service build the knockout round.
+    for (final Map<String, Object?> row in groupMatchRows) {
+      await db.update(
+        t.matches,
+        <String, Object?>{
+          'status': t.matchFinished,
+          'home_goals': 1,
+          'away_goals': 0,
+          'winner_id': row['home_team_id'],
+        },
+        where: 'match_id = ?',
+        whereArgs: <Object?>[row['match_id']],
+      );
+    }
+    final List<Map<String, Object?>> registered = await db.rawQuery(
+      '''
+      SELECT tm.* FROM season_teams st
+      JOIN teams tm ON tm.team_id = st.team_id
+      WHERE st.season_id = ?
+    ''',
+      <Object?>[seasonId],
+    );
+    final Map<int, Team> cache = <int, Team>{
+      for (final Map<String, Object?> row in registered)
+        row['team_id'] as int: Team.fromMap(row),
+    };
+    final CareerService service = CareerService(
+      db,
+      refs: refs,
+      seasons: seasons,
+      squads: SquadRepository(db),
+      matches: MatchRepository(db),
+      messages: MessageRepository(db),
+      engine: MatchEngine(random: Random(9)),
+      generator: generator,
+      random: Random(9),
+    );
+    final bool scheduled = await service.maybeScheduleNextCupRound(
+      seasonId: seasonId,
+      cupTournamentId: continental.tournamentId,
+      teamCache: cache,
+    );
+    expect(scheduled, isTrue);
+
+    final List<Map<String, Object?>> knockout = await db.query(
+      t.matches,
+      where:
+          'season_id = ? AND tournament_id = ? AND group_id IS NULL '
+          'AND phase = 1',
+      whereArgs: <Object?>[seasonId, continental.tournamentId],
+    );
+    expect(
+      knockout.length,
+      groups.length,
+      reason: 'two qualifiers per group make one tie per group',
+    );
   });
 
   test('double round robin pairs every team once per round', () {

@@ -238,12 +238,16 @@ class FixtureMatch {
     required this.homeGoals,
     required this.awayGoals,
     required this.winnerId,
+    this.groupId,
   });
 
   final int matchId;
   final int tournamentId;
   final int round;
   final int phase;
+
+  /// Set for group-stage matches; knockout rounds leave it null.
+  final int? groupId;
   final int status;
   final int homeTeamId;
   final int awayTeamId;
@@ -261,6 +265,7 @@ class FixtureMatch {
     tournamentId: m['tournament_id'] as int,
     round: (m['round'] as int?) ?? 0,
     phase: (m['phase'] as int?) ?? 0,
+    groupId: m['group_id'] as int?,
     status: (m['status'] as int?) ?? 1,
     homeTeamId: m['home_team_id'] as int,
     awayTeamId: m['away_team_id'] as int,
@@ -397,6 +402,14 @@ class StandingRow {
   int played, wins, draws, losses, goalsFor, goalsAgainst, points;
 
   int get goalDifference => goalsFor - goalsAgainst;
+}
+
+/// Standings of one group in a tournament with a group stage.
+class GroupTable {
+  GroupTable({required this.groupId, required this.rows});
+
+  final int groupId;
+  final List<StandingRow> rows;
 }
 
 /// One row of a statistical leaderboard (scorers, assists, clean sheets...).

@@ -301,6 +301,25 @@ void main() {
     );
     expect(newMatches, greaterThan(300));
 
+    // Relegation must be balanced by promotion so the league never shrinks.
+    final int? topDivisionClubs = firstInt(
+      await db.rawQuery(
+        'SELECT COUNT(*) FROM teams WHERE country_id = ? AND division = 1',
+        <Object?>[countryId],
+      ),
+    );
+    expect(topDivisionClubs, 18);
+
+    // Past-season tables stay readable after the rollover.
+    final List<StandingRow> archivedTable = await seasons.standings(
+      seasonId,
+      league.tournamentId,
+    );
+    expect(archivedTable.length, 18);
+    expect(archivedTable.every((StandingRow row) => row.played == 34), isTrue);
+    final List<Season> allSeasons = await seasons.allSeasons();
+    expect(allSeasons.length, 2);
+
     // Player career stats were archived before match rows were cleared.
     final int? archived = firstInt(
       await db.rawQuery('SELECT COUNT(*) FROM player_season_stats'),
