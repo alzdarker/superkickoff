@@ -1,5 +1,7 @@
 /// Typed models for the core game entities. Only the entities the game
 /// actively manipulates get classes; the rest are read as raw maps.
+import '../db/schema.dart' as t;
+
 class Country {
   Country({
     required this.countryId,
@@ -16,20 +18,20 @@ class Country {
   final int confederation;
 
   factory Country.fromMap(Map<String, Object?> m) => Country(
-        countryId: m['country_id'] as int,
-        name: m['name'] as String? ?? '',
-        iso2: m['iso2'] as String? ?? '',
-        power: (m['power'] as int?) ?? 0,
-        confederation: (m['confederation'] as int?) ?? 0,
-      );
+    countryId: m['country_id'] as int,
+    name: m['name'] as String? ?? '',
+    iso2: m['iso2'] as String? ?? '',
+    power: (m['power'] as int?) ?? 0,
+    confederation: (m['confederation'] as int?) ?? 0,
+  );
 
   Map<String, Object?> toMap() => <String, Object?>{
-        'country_id': countryId,
-        'name': name,
-        'iso2': iso2,
-        'power': power,
-        'confederation': confederation,
-      };
+    'country_id': countryId,
+    'name': name,
+    'iso2': iso2,
+    'power': power,
+    'confederation': confederation,
+  };
 }
 
 class Team {
@@ -60,32 +62,32 @@ class Team {
   final int foundedYear;
 
   factory Team.fromMap(Map<String, Object?> m) => Team(
-        teamId: m['team_id'] as int,
-        name: m['name'] as String,
-        abbreviation: m['abbreviation'] as String? ?? '',
-        countryId: m['country_id'] as int,
-        power: (m['power'] as int?) ?? 0,
-        value: (m['value'] as int?) ?? 0,
-        budget: (m['budget'] as int?) ?? 0,
-        division: (m['division'] as int?) ?? 1,
-        stadiumId: m['stadium_id'] as int,
-        coachId: m['coach_id'] as int,
-        foundedYear: (m['founded_year'] as int?) ?? 1900,
-      );
+    teamId: m['team_id'] as int,
+    name: m['name'] as String,
+    abbreviation: m['abbreviation'] as String? ?? '',
+    countryId: m['country_id'] as int,
+    power: (m['power'] as int?) ?? 0,
+    value: (m['value'] as int?) ?? 0,
+    budget: (m['budget'] as int?) ?? 0,
+    division: (m['division'] as int?) ?? 1,
+    stadiumId: m['stadium_id'] as int,
+    coachId: m['coach_id'] as int,
+    foundedYear: (m['founded_year'] as int?) ?? 1900,
+  );
 
   Map<String, Object?> toMap() => <String, Object?>{
-        'team_id': teamId,
-        'name': name,
-        'abbreviation': abbreviation,
-        'country_id': countryId,
-        'power': power,
-        'value': value,
-        'budget': budget,
-        'division': division,
-        'stadium_id': stadiumId,
-        'coach_id': coachId,
-        'founded_year': foundedYear,
-      };
+    'team_id': teamId,
+    'name': name,
+    'abbreviation': abbreviation,
+    'country_id': countryId,
+    'power': power,
+    'value': value,
+    'budget': budget,
+    'division': division,
+    'stadium_id': stadiumId,
+    'coach_id': coachId,
+    'founded_year': foundedYear,
+  };
 }
 
 class Player {
@@ -94,6 +96,7 @@ class Player {
     required this.name,
     required this.age,
     required this.positionId,
+    this.profile = 'D',
     required this.power,
     required this.potential,
     required this.fitness,
@@ -116,6 +119,9 @@ class Player {
   final String name;
   final int age;
   final int positionId;
+
+  /// Preferred foot: 'D' for right, 'I' for left.
+  final String profile;
   final int power;
   final int potential;
   final int fitness;
@@ -134,27 +140,28 @@ class Player {
   final String? championships;
 
   factory Player.fromMap(Map<String, Object?> m) => Player(
-        playerId: m['player_id'] as int,
-        name: m['name'] as String,
-        age: (m['age'] as int?) ?? 17,
-        positionId: m['position_id'] as int,
-        power: (m['power'] as int?) ?? 0,
-        potential: (m['potential'] as int?) ?? 0,
-        fitness: (m['fitness'] as int?) ?? 100,
-        value: (m['value'] as int?) ?? 0,
-        salary: (m['salary'] as int?) ?? 0,
-        countryId: m['country_id'] as int,
-        squadStatus: (m['squad_status'] as int?) ?? 1,
-        marketStatus: (m['market_status'] as int?) ?? 1,
-        statusId: (m['status_id'] as int?) ?? 1,
-        isCaptain: (m['is_captain'] as int? ?? 0) == 1,
-        shirtNumber: (m['shirt_number'] as int?) ?? 0,
-        stars: (m['stars'] as int?) ?? 0,
-        skillA: m['skill_a'] as int? ?? 0,
-        skillB: m['skill_b'] as int? ?? 0,
-        height: (m['height'] as int?) ?? 175,
-        championships: m['championships'] as String?,
-      );
+    playerId: m['player_id'] as int,
+    name: m['name'] as String,
+    age: (m['age'] as int?) ?? 17,
+    positionId: m['position_id'] as int,
+    profile: (m['profile'] as String?) ?? 'D',
+    power: (m['power'] as int?) ?? 0,
+    potential: (m['potential'] as int?) ?? 0,
+    fitness: (m['fitness'] as int?) ?? 100,
+    value: (m['value'] as int?) ?? 0,
+    salary: (m['salary'] as int?) ?? 0,
+    countryId: m['country_id'] as int,
+    squadStatus: (m['squad_status'] as int?) ?? 1,
+    marketStatus: (m['market_status'] as int?) ?? 1,
+    statusId: (m['status_id'] as int?) ?? 1,
+    isCaptain: (m['is_captain'] as int? ?? 0) == 1,
+    shirtNumber: (m['shirt_number'] as int?) ?? 0,
+    stars: (m['stars'] as int?) ?? 0,
+    skillA: m['skill_a'] as int? ?? 0,
+    skillB: m['skill_b'] as int? ?? 0,
+    height: (m['height'] as int?) ?? 175,
+    championships: m['championships'] as String?,
+  );
 }
 
 class Tournament {
@@ -192,20 +199,20 @@ class Tournament {
   bool get isNationalCup => organization == DbOrg.orgNationalCup;
 
   factory Tournament.fromMap(Map<String, Object?> m) => Tournament(
-        tournamentId: m['tournament_id'] as int,
-        name: m['name'] as String,
-        organization: (m['organization'] as int?) ?? 1,
-        divisionId: (m['division_id'] as int?) ?? 1,
-        slots: int.tryParse('${m['slots']}') ?? 16,
-        promotionSlots: (m['promotion_slots'] as int?) ?? 0,
-        relegationSpots: (m['relegation_spots'] as int?) ?? 0,
-        points: (m['points'] as num?)?.toDouble() ?? 0,
-        prizeTeams: (m['prize_teams'] as int?) ?? 0,
-        prizeTopScorer: (m['prize_top_scorer'] as int?) ?? 0,
-        prizeMvp: (m['prize_mvp'] as int?) ?? 0,
-        playDays: m['play_days'] as String? ?? '6,7',
-        rounds: (m['rounds'] as int?) ?? 1,
-      );
+    tournamentId: m['tournament_id'] as int,
+    name: m['name'] as String,
+    organization: (m['organization'] as int?) ?? 1,
+    divisionId: (m['division_id'] as int?) ?? 1,
+    slots: int.tryParse('${m['slots']}') ?? 16,
+    promotionSlots: (m['promotion_slots'] as int?) ?? 0,
+    relegationSpots: (m['relegation_spots'] as int?) ?? 0,
+    points: (m['points'] as num?)?.toDouble() ?? 0,
+    prizeTeams: (m['prize_teams'] as int?) ?? 0,
+    prizeTopScorer: (m['prize_top_scorer'] as int?) ?? 0,
+    prizeMvp: (m['prize_mvp'] as int?) ?? 0,
+    playDays: m['play_days'] as String? ?? '6,7',
+    rounds: (m['rounds'] as int?) ?? 1,
+  );
 }
 
 /// Alias so model files do not each import the DB constants.
@@ -248,19 +255,19 @@ class FixtureMatch {
   bool get isScheduled => status == DbMatch.matchScheduled;
 
   factory FixtureMatch.fromMap(Map<String, Object?> m) => FixtureMatch(
-        matchId: m['match_id'] as int,
-        tournamentId: m['tournament_id'] as int,
-        round: (m['round'] as int?) ?? 0,
-        phase: (m['phase'] as int?) ?? 0,
-        status: (m['status'] as int?) ?? 1,
-        homeTeamId: m['home_team_id'] as int,
-        awayTeamId: m['away_team_id'] as int,
-        stadiumId: m['stadium_id'] as int,
-        date: m['date'] as String?,
-        homeGoals: m['home_goals'] as int?,
-        awayGoals: m['away_goals'] as int?,
-        winnerId: m['winner_id'] as int?,
-      );
+    matchId: m['match_id'] as int,
+    tournamentId: m['tournament_id'] as int,
+    round: (m['round'] as int?) ?? 0,
+    phase: (m['phase'] as int?) ?? 0,
+    status: (m['status'] as int?) ?? 1,
+    homeTeamId: m['home_team_id'] as int,
+    awayTeamId: m['away_team_id'] as int,
+    stadiumId: m['stadium_id'] as int,
+    date: m['date'] as String?,
+    homeGoals: m['home_goals'] as int?,
+    awayGoals: m['away_goals'] as int?,
+    winnerId: m['winner_id'] as int?,
+  );
 }
 
 class DbMatch {
@@ -284,11 +291,11 @@ class Position {
   final int type;
 
   factory Position.fromMap(Map<String, Object?> m) => Position(
-        positionId: m['position_id'] as int,
-        abbreviation: m['abbreviation'] as String,
-        name: m['name'] as String,
-        type: (m['type'] as int?) ?? 0,
-      );
+    positionId: m['position_id'] as int,
+    abbreviation: m['abbreviation'] as String,
+    name: m['name'] as String,
+    type: (m['type'] as int?) ?? 0,
+  );
 }
 
 class Stadium {
@@ -305,15 +312,15 @@ class Stadium {
   final int capacityTotal;
 
   factory Stadium.fromMap(Map<String, Object?> m) => Stadium(
-        stadiumId: m['stadium_id'] as int,
-        name: m['name'] as String? ?? '',
-        city: m['city'] as String?,
-        capacityTotal:
-            ((m['capacity_general'] as int?) ?? 0) +
-                ((m['capacity_stand'] as int?) ?? 0) +
-                ((m['capacity_terrace'] as int?) ?? 0) +
-                ((m['capacity_boxes'] as int?) ?? 0),
-      );
+    stadiumId: m['stadium_id'] as int,
+    name: m['name'] as String? ?? '',
+    city: m['city'] as String?,
+    capacityTotal:
+        ((m['capacity_general'] as int?) ?? 0) +
+        ((m['capacity_stand'] as int?) ?? 0) +
+        ((m['capacity_terrace'] as int?) ?? 0) +
+        ((m['capacity_boxes'] as int?) ?? 0),
+  );
 }
 
 class Message {
@@ -336,14 +343,14 @@ class Message {
   final int type;
 
   factory Message.fromMap(Map<String, Object?> m) => Message(
-        messageId: m['message_id'] as int,
-        title: m['title'] as String? ?? '',
-        body: m['body'] as String? ?? '',
-        date: m['date'] as String?,
-        sender: m['sender'] as String?,
-        isRead: (m['is_read'] as int? ?? 0) == 1,
-        type: (m['type'] as int?) ?? 0,
-      );
+    messageId: m['message_id'] as int,
+    title: m['title'] as String? ?? '',
+    body: m['body'] as String? ?? '',
+    date: m['date'] as String?,
+    sender: m['sender'] as String?,
+    isRead: (m['is_read'] as int? ?? 0) == 1,
+    type: (m['type'] as int?) ?? 0,
+  );
 }
 
 class Season {
@@ -360,11 +367,11 @@ class Season {
   final int endYear;
 
   factory Season.fromMap(Map<String, Object?> m) => Season(
-        seasonId: m['season_id'] as int,
-        name: m['name'] as String,
-        startYear: (m['start_year'] as int?) ?? 2025,
-        endYear: (m['end_year'] as int?) ?? 2026,
-      );
+    seasonId: m['season_id'] as int,
+    name: m['name'] as String,
+    startYear: (m['start_year'] as int?) ?? 2025,
+    endYear: (m['end_year'] as int?) ?? 2026,
+  );
 }
 
 /// A single standings-table row, computed on the fly from results.
@@ -388,4 +395,351 @@ class StandingRow {
   int played, wins, draws, losses, goalsFor, goalsAgainst, points;
 
   int get goalDifference => goalsFor - goalsAgainst;
+}
+
+/// One row of a statistical leaderboard (scorers, assists, clean sheets...).
+class LeaderRow {
+  LeaderRow({
+    required this.playerId,
+    required this.playerName,
+    required this.clubName,
+    required this.positionId,
+    required this.teamId,
+    this.profile = 'D',
+    required this.value,
+  });
+
+  final int playerId;
+  final String playerName;
+  final String clubName;
+  final int positionId;
+
+  /// Team the player represented for these statistics.
+  final int teamId;
+  final String profile;
+  final double value;
+
+  /// Counts are whole numbers; ratings keep one decimal.
+  String get display => value == value.roundToDouble()
+      ? '${value.toInt()}'
+      : value.toStringAsFixed(1);
+}
+
+/// Active contract details shown in the player profile.
+class ContractInfo {
+  ContractInfo({
+    required this.startDate,
+    required this.endDate,
+    required this.salary,
+    this.goalBonus,
+    this.assistBonus,
+    this.mvpBonus,
+    this.titleBonus,
+    this.appearanceBonus,
+  });
+
+  final String startDate;
+  final String endDate;
+  final int salary;
+  final int? goalBonus;
+  final int? assistBonus;
+  final int? mvpBonus;
+  final int? titleBonus;
+  final int? appearanceBonus;
+}
+
+/// Aggregated current-season numbers for one player.
+class PlayerSeasonSummary {
+  const PlayerSeasonSummary({
+    required this.matches,
+    required this.minutes,
+    required this.goals,
+    required this.assists,
+    required this.mvps,
+    required this.yellowCards,
+    required this.redCards,
+    required this.rating,
+  });
+
+  final int matches;
+  final int minutes;
+  final int goals;
+  final int assists;
+  final int mvps;
+  final int yellowCards;
+  final int redCards;
+  final double rating;
+
+  bool get isEmpty => matches == 0;
+
+  static const PlayerSeasonSummary empty = PlayerSeasonSummary(
+    matches: 0,
+    minutes: 0,
+    goals: 0,
+    assists: 0,
+    mvps: 0,
+    yellowCards: 0,
+    redCards: 0,
+    rating: 0,
+  );
+}
+
+/// One line of a player's transfer history.
+class TransferRecord {
+  TransferRecord({
+    required this.playerId,
+    required this.playerName,
+    required this.date,
+    required this.fromTeamId,
+    required this.toTeamId,
+    required this.fromTeamName,
+    required this.toTeamName,
+    required this.value,
+    required this.type,
+  });
+
+  final int playerId;
+  final String playerName;
+  final String date;
+  final int? fromTeamId;
+  final int? toTeamId;
+  final String fromTeamName;
+  final String toTeamName;
+  final int value;
+  final int type;
+}
+
+/// Everything needed by the player profile sheet.
+class PlayerDetail {
+  PlayerDetail({
+    required this.player,
+    required this.clubId,
+    required this.clubName,
+    required this.countryName,
+    required this.contract,
+    required this.stats,
+    required this.transfers,
+    required this.suspensionMatches,
+    required this.career,
+    required this.awards,
+  });
+
+  final Player player;
+  final int? clubId;
+  final String clubName;
+  final String countryName;
+  final ContractInfo? contract;
+  final PlayerSeasonSummary stats;
+  final List<TransferRecord> transfers;
+  final int suspensionMatches;
+  final List<PlayerCareerRow> career;
+  final List<PlayerAward> awards;
+}
+
+/// Club overview used by the club hub sheet (finances, coach, stadium).
+class ClubOverview {
+  ClubOverview({
+    required this.team,
+    required this.countryName,
+    required this.stadiumName,
+    required this.stadiumCity,
+    required this.general,
+    required this.stand,
+    required this.terrace,
+    required this.boxes,
+    required this.maxGeneral,
+    required this.maxStand,
+    required this.maxTerrace,
+    required this.maxBoxes,
+    required this.coachName,
+    required this.coachAge,
+    required this.coachPoints,
+    required this.coachCountry,
+    required this.squadValue,
+    required this.wageBill,
+    required this.expiringContracts,
+    required this.transferSpend,
+    required this.transferIncome,
+  });
+
+  final Team team;
+  final String countryName;
+  final String stadiumName;
+  final String stadiumCity;
+  final int general;
+  final int stand;
+  final int terrace;
+  final int boxes;
+  final int maxGeneral;
+  final int maxStand;
+  final int maxTerrace;
+  final int maxBoxes;
+  final String coachName;
+  final int coachAge;
+  final int coachPoints;
+  final String coachCountry;
+  final int squadValue;
+  final int wageBill;
+  final int expiringContracts;
+  final int transferSpend;
+  final int transferIncome;
+
+  int get capacity => general + stand + terrace + boxes;
+
+  static int nextTier(int current, int max) {
+    if (current >= max) return current;
+    final int step = current ~/ 10 < 100 ? 100 : current ~/ 10;
+    final int next = current + step;
+    return next > max ? max : next;
+  }
+
+  int get upgradeSeats =>
+      (nextTier(general, maxGeneral) - general) +
+      (nextTier(stand, maxStand) - stand) +
+      (nextTier(terrace, maxTerrace) - terrace) +
+      (nextTier(boxes, maxBoxes) - boxes);
+
+  bool get atMaxCapacity => upgradeSeats <= 0;
+
+  int get expansionCost => upgradeSeats * 1200;
+
+  int get netTransfers => transferIncome - transferSpend;
+}
+
+/// Weekly training availability and eligible-player counts per focus.
+class TrainingState {
+  const TrainingState({
+    required this.usedThisMatchday,
+    required this.sessions,
+    required this.matchesPlayed,
+    required this.cost,
+    required this.eligible,
+  });
+
+  final bool usedThisMatchday;
+  final int sessions;
+  final int matchesPlayed;
+  final int cost;
+
+  /// Focus key (see [TrainingFocus.name]) -> number of eligible players.
+  final Map<String, int> eligible;
+}
+
+/// Result of one training session.
+class TrainingOutcome {
+  const TrainingOutcome({
+    this.error,
+    this.improved = const <String>[],
+    this.cost = 0,
+  });
+
+  final String? error;
+  final List<String> improved;
+  final int cost;
+
+  bool get ok => error == null;
+}
+
+/// One archived season in a player's career (from player_season_stats).
+class PlayerCareerRow {
+  PlayerCareerRow({
+    required this.seasonId,
+    required this.seasonName,
+    required this.teamName,
+    required this.matches,
+    required this.minutes,
+    required this.starts,
+    required this.goals,
+    required this.assists,
+    required this.mvps,
+    required this.yellowCards,
+    required this.redCards,
+    required this.ratingSum,
+  });
+
+  final int seasonId;
+  final String seasonName;
+  final String teamName;
+  final int matches;
+  final int minutes;
+  final int starts;
+  final int goals;
+  final int assists;
+  final int mvps;
+  final int yellowCards;
+  final int redCards;
+
+  /// The archive stores the sum of match ratings; the UI shows the average.
+  final int ratingSum;
+
+  double get rating => matches == 0 ? 0 : ratingSum / matches;
+}
+
+/// A player award stored in player_awards.
+class PlayerAward {
+  PlayerAward({
+    required this.awardId,
+    required this.playerId,
+    required this.playerName,
+    required this.teamName,
+    required this.type,
+    required this.year,
+    required this.seasonId,
+    this.goals,
+  });
+
+  final int awardId;
+  final int playerId;
+  final String playerName;
+  final String teamName;
+  final int type;
+  final int year;
+  final int seasonId;
+  final int? goals;
+
+  String get label => switch (type) {
+        t.awardTopScorer => 'Top scorer',
+        t.awardMvp => 'MVP',
+        t.awardYoungPlayer => 'Best young player',
+        _ => 'Award',
+      };
+}
+
+/// One season in the manager's career history.
+class CareerSeason {
+  CareerSeason({
+    required this.seasonId,
+    required this.seasonName,
+    required this.teamName,
+    required this.matches,
+    required this.wins,
+    required this.draws,
+    required this.losses,
+    required this.goalsFor,
+    required this.goalsAgainst,
+    required this.championships,
+  });
+
+  final int seasonId;
+  final String seasonName;
+  final String teamName;
+  final int matches;
+  final int wins;
+  final int draws;
+  final int losses;
+  final int goalsFor;
+  final int goalsAgainst;
+  final String championships;
+
+  String get record => '$wins-$draws-$losses';
+}
+
+/// Combined club history payload for the club hub.
+class ClubHistory {
+  const ClubHistory({required this.seasons, required this.awards});
+
+  final List<CareerSeason> seasons;
+  final List<PlayerAward> awards;
+
+  bool get isEmpty => seasons.isEmpty && awards.isEmpty;
 }

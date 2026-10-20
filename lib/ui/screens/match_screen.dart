@@ -9,6 +9,7 @@ import '../../game/match_engine.dart';
 import '../../state/career_provider.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'match_stats_sheet.dart';
 
 /// Live match viewer: the result is pre-simulated by the engine and revealed
 /// minute by minute, exactly like Superkickoff's timeline games.
@@ -32,10 +33,12 @@ class _MatchScreenState extends State<MatchScreen> {
 
   void startClock() {
     _ticker?.cancel();
-    _ticker = Timer.periodic(Duration(milliseconds: (400 / speed).round()),
-        (Timer t) {
-      final LiveMatchSession? session =
-          context.read<CareerProvider>().liveSession;
+    _ticker = Timer.periodic(Duration(milliseconds: (400 / speed).round()), (
+      Timer t,
+    ) {
+      final LiveMatchSession? session = context
+          .read<CareerProvider>()
+          .liveSession;
       if (session == null) return;
       if (displayedMinute < 90) {
         setState(() => displayedMinute++);
@@ -48,6 +51,18 @@ class _MatchScreenState extends State<MatchScreen> {
   void finishInstantly() {
     setState(() => displayedMinute = 90);
     _ticker?.cancel();
+  }
+
+  void showStats(LiveMatchSession session) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => FractionallySizedBox(
+        heightFactor: 0.88,
+        child: MatchStatsSheet(session: session),
+      ),
+    );
   }
 
   @override
@@ -63,8 +78,9 @@ class _MatchScreenState extends State<MatchScreen> {
     }
     final int homeGoals = _goalsUpTo(session, true);
     final int awayGoals = _goalsUpTo(session, false);
-    final List<MatchEvent> shown =
-        session.result.events.where((MatchEvent e) => e.minute <= displayedMinute).toList();
+    final List<MatchEvent> shown = session.result.events
+        .where((MatchEvent e) => e.minute <= displayedMinute)
+        .toList();
     final bool finished = displayedMinute >= 90;
 
     return Scaffold(
@@ -90,10 +106,12 @@ class _MatchScreenState extends State<MatchScreen> {
     int goals = 0;
     for (final MatchEvent e in session.result.events) {
       if (e.minute > displayedMinute) break;
-      if (e.type == MatchEvent.goal || e.type == MatchEvent.ownGoal ||
+      if (e.type == MatchEvent.goal ||
+          e.type == MatchEvent.ownGoal ||
           e.type == MatchEvent.penaltyScored) {
-        final bool benefitsHome =
-            e.type == MatchEvent.ownGoal ? !e.isHome : e.isHome;
+        final bool benefitsHome = e.type == MatchEvent.ownGoal
+            ? !e.isHome
+            : e.isHome;
         if (benefitsHome == home) goals++;
       }
     }
@@ -117,7 +135,9 @@ class _MatchScreenState extends State<MatchScreen> {
                 Text(
                   session.homeTeam.abbreviation,
                   style: const TextStyle(
-                      fontSize: 22, fontWeight: FontWeight.bold),
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -133,13 +153,18 @@ class _MatchScreenState extends State<MatchScreen> {
               Text(
                 '$homeGoals - $awayGoals',
                 style: const TextStyle(
-                    fontSize: 34, fontWeight: FontWeight.w900),
+                  fontSize: 34,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
-              Text('$displayedMinute\'',
-                  style: TextStyle(
-                      color: AppTheme.accent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold)),
+              Text(
+                '$displayedMinute\'',
+                style: TextStyle(
+                  color: AppTheme.accent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ],
           ),
           Expanded(
@@ -148,7 +173,9 @@ class _MatchScreenState extends State<MatchScreen> {
                 Text(
                   session.awayTeam.abbreviation,
                   style: const TextStyle(
-                      fontSize: 22, fontWeight: FontWeight.bold),
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -167,20 +194,37 @@ class _MatchScreenState extends State<MatchScreen> {
   Widget _eventTile(MatchEvent e, LiveMatchSession session) {
     final (String label, IconData icon, Color color) = switch (e.type) {
       MatchEvent.goal => ('Goal', Icons.sports_soccer, AppTheme.accent),
-      MatchEvent.penaltyScored =>
-        ('Penalty scored', Icons.sports_handball, AppTheme.accent),
-      MatchEvent.penaltyMissed =>
-        ('Penalty missed', Icons.sports_handball, AppTheme.warn),
+      MatchEvent.penaltyScored => (
+        'Penalty scored',
+        Icons.sports_handball,
+        AppTheme.accent,
+      ),
+      MatchEvent.penaltyMissed => (
+        'Penalty missed',
+        Icons.sports_handball,
+        AppTheme.warn,
+      ),
       MatchEvent.ownGoal => ('Own goal', Icons.error_outline, AppTheme.danger),
       MatchEvent.save => ('Save', Icons.pan_tool, AppTheme.textDim),
       MatchEvent.yellow => ('Yellow card', Icons.square, AppTheme.warn),
       MatchEvent.red => ('Red card', Icons.square, AppTheme.danger),
       MatchEvent.injury => ('Injury', Icons.medical_services, AppTheme.danger),
-      MatchEvent.subIn => ('Substitution in', Icons.swap_horiz, AppTheme.textDim),
-      MatchEvent.subOut => ('Substitution out', Icons.swap_horiz, AppTheme.textDim),
+      MatchEvent.subIn => (
+        'Substitution in',
+        Icons.swap_horiz,
+        AppTheme.textDim,
+      ),
+      MatchEvent.subOut => (
+        'Substitution out',
+        Icons.swap_horiz,
+        AppTheme.textDim,
+      ),
       MatchEvent.varCheck => ('VAR check', Icons.monitor, AppTheme.textDim),
-      MatchEvent.varGoalDisallowed =>
-        ('Goal disallowed', Icons.videocam_off, AppTheme.danger),
+      MatchEvent.varGoalDisallowed => (
+        'Goal disallowed',
+        Icons.videocam_off,
+        AppTheme.danger,
+      ),
       _ => (e.type, Icons.info, AppTheme.textDim),
     };
     final Team team = e.isHome ? session.homeTeam : session.awayTeam;
@@ -191,13 +235,18 @@ class _MatchScreenState extends State<MatchScreen> {
         '${e.minute}\'  $label${e.playerName != null ? '  ·  ${e.playerName}' : ''}',
         style: const TextStyle(fontSize: 13),
       ),
-      trailing: Text(team.abbreviation,
-          style: const TextStyle(color: AppTheme.textDim, fontSize: 11)),
+      trailing: Text(
+        team.abbreviation,
+        style: const TextStyle(color: AppTheme.textDim, fontSize: 11),
+      ),
     );
   }
 
   Widget _controls(
-      bool finished, LiveMatchSession session, CareerProvider game) {
+    bool finished,
+    LiveMatchSession session,
+    CareerProvider game,
+  ) {
     return SafeArea(
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -212,30 +261,40 @@ class _MatchScreenState extends State<MatchScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: <Widget>[
-                      statChip('Final score',
-                          'FT', color: AppTheme.accent),
+                      statChip('Final score', 'FT', color: AppTheme.accent),
                       const SizedBox(width: 16),
                       statChip(
-                          'Revenue',
-                          money(session.result.revenue),
-                          icon: Icons.payments),
+                        'Revenue',
+                        money(session.result.revenue),
+                        icon: Icons.payments,
+                      ),
                       const SizedBox(width: 16),
                       statChip(
-                          'Attendance',
-                          '${session.result.attendanceGeneral + session.result.attendanceStand + session.result.attendanceTerrace + session.result.attendanceBoxes}',
-                          icon: Icons.groups),
+                        'Attendance',
+                        '${session.result.attendanceGeneral + session.result.attendanceStand + session.result.attendanceTerrace + session.result.attendanceBoxes}',
+                        icon: Icons.groups,
+                      ),
                     ],
                   ),
                   const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: () async {
-                        await game.finishLiveMatch();
-                        if (mounted) Navigator.of(context).pop();
-                      },
-                      child: const Text('Continue'),
-                    ),
+                  Row(
+                    children: <Widget>[
+                      OutlinedButton.icon(
+                        onPressed: () => showStats(session),
+                        icon: const Icon(Icons.bar_chart, size: 16),
+                        label: const Text('Stats'),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () async {
+                            await game.finishLiveMatch();
+                            if (mounted) Navigator.of(context).pop();
+                          },
+                          child: const Text('Continue'),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               )
@@ -248,7 +307,10 @@ class _MatchScreenState extends State<MatchScreen> {
                           speed = s;
                           startClock();
                         }),
-                        icon: Icon(speed == s ? Icons.check : Icons.speed, size: 14),
+                        icon: Icon(
+                          speed == s ? Icons.check : Icons.speed,
+                          size: 14,
+                        ),
                         label: Text('${s}x'),
                       ),
                     ),

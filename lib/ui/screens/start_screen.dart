@@ -34,8 +34,11 @@ class StartScreen extends StatelessWidget {
                     color: AppTheme.accent,
                     borderRadius: BorderRadius.circular(24),
                   ),
-                  child: const Icon(Icons.sports_soccer,
-                      size: 56, color: Colors.black87),
+                  child: const Icon(
+                    Icons.sports_soccer,
+                    size: 56,
+                    color: Colors.black87,
+                  ),
                 ),
                 const SizedBox(height: 20),
                 const Text(
@@ -73,17 +76,19 @@ class StartScreen extends StatelessWidget {
                     onPressed: game.hasCareer
                         ? null
                         : () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => const SetupScreen(),
-                              ),
+                            MaterialPageRoute<void>(
+                              builder: (_) => const SetupScreen(),
                             ),
+                          ),
                   ),
                   const SizedBox(height: 30),
                   Text(
                     '${game.initialized ? 'Database ready' : 'Loading...'}'
                     ' • 2,014 clubs • 55k players',
                     style: const TextStyle(
-                        fontSize: 11, color: AppTheme.textDim),
+                      fontSize: 11,
+                      color: AppTheme.textDim,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 40),

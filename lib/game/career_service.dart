@@ -11,6 +11,7 @@ import '../data/repositories/message_repository.dart';
 import '../data/repositories/reference_repository.dart';
 import '../data/repositories/season_repository.dart';
 import '../data/repositories/squad_repository.dart';
+import 'formation.dart';
 import 'match_engine.dart';
 import 'season_generator.dart';
 
@@ -30,16 +31,14 @@ class CareerService {
     required SeasonGenerator generator,
     Random? random,
     this.marketTickChance = 0.45,
-  })  : _refs = refs,
-        _seasons = seasons,
-        _squads = squads,
-        _matchRepo = matches,
-        _messages = messages,
-        _engine = engine,
-        _gen = generator,
-        _rng = random ?? Random();
-
-
+  }) : _refs = refs,
+       _seasons = seasons,
+       _squads = squads,
+       _matchRepo = matches,
+       _messages = messages,
+       _engine = engine,
+       _gen = generator,
+       _rng = random ?? Random();
 
   final Database db;
   final ReferenceRepository _refs;
@@ -51,21 +50,23 @@ class CareerService {
   final SeasonGenerator _gen;
   final Random _rng;
 
+  /// Cup tournaments already resolved to knockout status.
+  final Set<int> _cupTournaments = <int>{};
+
   /// Chance that the AI transfer market does something each week.
   final double marketTickChance;
 
   // ------------------------------------------------------------ fixtures
 
   /// All scheduled matches of a season, sorted by date.
-  Future<List<FixtureMatch>> upcomingMatches(int seasonId) =>
-      db
-          .query(
+  Future<List<FixtureMatch>> upcomingMatches(int seasonId) => db
+      .query(
         t.matches,
         where: 'season_id = ? AND status = ?',
         whereArgs: <Object?>[seasonId, t.matchScheduled],
         orderBy: 'date ASC, match_id ASC',
       )
-          .then((rows) => rows.map(FixtureMatch.fromMap).toList());
+      .then((rows) => rows.map(FixtureMatch.fromMap).toList());
 
   /// The date of the next scheduled match (the current match day).
   Future<String?> nextMatchDate(int seasonId) async {
@@ -81,14 +82,13 @@ class CareerService {
   }
 
   /// All scheduled matches on [date].
-  Future<List<FixtureMatch>> matchesOnDate(int seasonId, String date) =>
-      db
-          .query(
+  Future<List<FixtureMatch>> matchesOnDate(int seasonId, String date) => db
+      .query(
         t.matches,
         where: 'season_id = ? AND status = ? AND date = ?',
         whereArgs: <Object?>[seasonId, t.matchScheduled, date],
       )
-          .then((rows) => rows.map(FixtureMatch.fromMap).toList());
+      .then((rows) => rows.map(FixtureMatch.fromMap).toList());
 
   // ------------------------------------------------------------ simulation
 
@@ -101,6 +101,12 @@ class CareerService {
     }
     final List<Player> homeSquad = await _squads.squadForTeam(home.teamId);
     final List<Player> awaySquad = await _squads.squadForTeam(away.teamId);
+    final Formation homeFormation = Formation.parse(
+      await _squads.formationForTeam(home.teamId),
+    );
+    final Formation awayFormation = Formation.parse(
+      await _squads.formationForTeam(away.teamId),
+    );
 
     final rows = await db.query(
       t.stadiums,
@@ -114,8 +120,9 @@ class CareerService {
       whereArgs: <Object?>[match.stadiumId],
       limit: 1,
     );
-    final Map<String, Object?> cap =
-        rows.isEmpty ? <String, Object?>{} : rows.first;
+    final Map<String, Object?> cap = rows.isEmpty
+        ? <String, Object?>{}
+        : rows.first;
 
     return MatchInput(
       homeSquad: homeSquad,
@@ -125,6 +132,8 @@ class CareerService {
       capacityTerrace: (cap['capacity_terrace'] as int?) ?? 0,
       capacityBoxes: (cap['capacity_boxes'] as int?) ?? 0,
       homePower: home.power,
+      homeFormation: homeFormation,
+      awayFormation: awayFormation,
       homeTeamId: home.teamId,
       awayTeamId: away.teamId,
       refereeTemper: await _refereeTemper(match),
@@ -132,7 +141,8 @@ class CareerService {
   }
 
   Future<int> _refereeTemper(FixtureMatch match) async {
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT rt.type_id AS type_id
       FROM referees r
       LEFT JOIN referee_types rt ON rt.type_id = r.type_id
@@ -140,7 +150,9 @@ class CareerService {
         SELECT country_id FROM teams WHERE team_id IN (?, ?)
       )
       ORDER BY RANDOM() LIMIT 1
-    ''', <Object?>[match.homeTeamId, match.awayTeamId]);
+    ''',
+      <Object?>[match.homeTeamId, match.awayTeamId],
+    );
     final int? typeId = rows.isEmpty ? null : rows.first['type_id'] as int?;
     return typeId ?? 2;
   }
@@ -158,13 +170,27 @@ class CareerService {
       recordEvents: recordEvents,
       bannedIds: banned,
     );
+    int? winnerId = result.homeGoals > result.awayGoals
+        ? match.homeTeamId
+        : (result.awayGoals > result.homeGoals ? match.awayTeamId : null);
+    int? penaltyHome;
+    int? penaltyAway;
+    // Knockout ties cannot end level: decide them with a shootout.
+    if (winnerId == null && await _isKnockout(match.tournamentId)) {
+      final bool homeWins = _rng.nextDouble() < 0.52;
+      winnerId = homeWins ? match.homeTeamId : match.awayTeamId;
+      final int winnerScore = 4 + _rng.nextInt(2);
+      final int loserScore = 2 + _rng.nextInt(2);
+      penaltyHome = homeWins ? winnerScore : loserScore;
+      penaltyAway = homeWins ? loserScore : winnerScore;
+    }
     await _matchRepo.saveResult(
       matchId: match.matchId,
       homeGoals: result.homeGoals,
       awayGoals: result.awayGoals,
-      winnerId: result.homeGoals > result.awayGoals
-          ? match.homeTeamId
-          : (result.awayGoals > result.homeGoals ? match.awayTeamId : null),
+      winnerId: winnerId,
+      penaltyHomeGoals: penaltyHome,
+      penaltyAwayGoals: penaltyAway,
       attendanceGeneral: result.attendanceGeneral,
       attendanceStand: result.attendanceStand,
       attendanceTerrace: result.attendanceTerrace,
@@ -193,12 +219,28 @@ class CareerService {
     return result;
   }
 
+  Future<bool> _isKnockout(int tournamentId) async {
+    if (_cupTournaments.contains(tournamentId)) return true;
+    final List<Map<String, Object?>> rows = await db.query(
+      t.tournaments,
+      columns: <String>['organization'],
+      where: 'tournament_id = ?',
+      whereArgs: <Object?>[tournamentId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    final bool isCup = (rows.first['organization'] as int?) == t.orgNationalCup;
+    if (isCup) _cupTournaments.add(tournamentId);
+    return isCup;
+  }
+
   /// Player ids currently suspended for either club in [match].
   Future<Set<int>> _suspendedPlayerIds(FixtureMatch match) async {
     final List<Map<String, Object?>> rows = await db.query(
       t.suspensions,
       columns: <String>['player_id'],
-      where: 'player_id IN (SELECT player_id FROM team_players '
+      where:
+          'player_id IN (SELECT player_id FROM team_players '
           'WHERE team_id IN (?, ?))',
       whereArgs: <Object?>[match.homeTeamId, match.awayTeamId],
     );
@@ -250,7 +292,8 @@ class CareerService {
     stillBanned.clear(); // ids already tracked in DB; provider re-reads
     // Only clubs registered for this season need recovery; touching all 55k
     // players every week would be needlessly slow.
-    await db.execute('''
+    await db.execute(
+      '''
       UPDATE players
       SET fitness = CASE
             WHEN fitness <= 40 THEN MIN(45, fitness + 2)
@@ -262,7 +305,9 @@ class CareerService {
         JOIN season_teams st ON st.team_id = tp.team_id
         WHERE st.season_id = ?
       )
-    ''', <Object?>[t.statusActive, seasonId]);
+    ''',
+      <Object?>[t.statusActive, seasonId],
+    );
     await _matchRepo.paySalaries(seasonId);
     await db.execute('UPDATE teams SET budget = MAX(budget, 20000)');
     await _runMarketAi(userTeamId);
@@ -306,36 +351,40 @@ class CareerService {
   Future<List<Team>> _registeredClubs() async {
     final Season? season = await _seasons.currentSeason();
     if (season == null) return <Team>[];
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT tm.* FROM season_teams st
       JOIN teams tm ON tm.team_id = st.team_id
       WHERE st.season_id = ?
-    ''', <Object?>[season.seasonId]);
+    ''',
+      <Object?>[season.seasonId],
+    );
     return rows.map(Team.fromMap).toList();
   }
 
   Player _playerFromRow(Map<String, Object?> row) => Player(
-        playerId: row['player_id'] as int,
-        name: row['name'] as String,
-        age: (row['age'] as int?) ?? 18,
-        positionId: (row['position_id'] as int?) ?? 1,
-        power: (row['power'] as int?) ?? 50,
-        potential: (row['potential'] as int?) ?? 50,
-        fitness: (row['fitness'] as int?) ?? 100,
-        value: (row['value'] as int?) ?? 0,
-        salary: (row['salary'] as int?) ?? 0,
-        countryId: (row['country_id'] as int?) ?? 0,
-        squadStatus: t.squadFirstTeam,
-        marketStatus: t.marketForSale,
-        statusId: t.statusActive,
-        isCaptain: false,
-        shirtNumber: 0,
-        stars: (row['stars'] as int?) ?? 0,
-        skillA: 0,
-        skillB: 0,
-        height: 178,
-        championships: null,
-      );
+    playerId: row['player_id'] as int,
+    name: row['name'] as String,
+    age: (row['age'] as int?) ?? 18,
+    positionId: (row['position_id'] as int?) ?? 1,
+    profile: (row['profile'] as String?) ?? 'D',
+    power: (row['power'] as int?) ?? 50,
+    potential: (row['potential'] as int?) ?? 50,
+    fitness: (row['fitness'] as int?) ?? 100,
+    value: (row['value'] as int?) ?? 0,
+    salary: (row['salary'] as int?) ?? 0,
+    countryId: (row['country_id'] as int?) ?? 0,
+    squadStatus: t.squadFirstTeam,
+    marketStatus: t.marketForSale,
+    statusId: t.statusActive,
+    isCaptain: false,
+    shirtNumber: 0,
+    stars: (row['stars'] as int?) ?? 0,
+    skillA: 0,
+    skillB: 0,
+    height: 178,
+    championships: null,
+  );
 
   static String _money(int amount) {
     if (amount >= 1000000) {
@@ -356,32 +405,50 @@ class CareerService {
     required int cupTournamentId,
     required Map<int, Team> teamCache,
   }) async {
-    final int remaining =
-        await _seasons.remainingMatches(seasonId, cupTournamentId);
+    final int remaining = await _seasons.remainingMatches(
+      seasonId,
+      cupTournamentId,
+    );
     if (remaining != 0) return false;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT winner_id FROM matches
       WHERE season_id = ? AND tournament_id = ?
         AND phase = (SELECT MAX(phase) FROM matches
                      WHERE season_id = ? AND tournament_id = ?)
         AND status = ? AND winner_id IS NOT NULL
-    ''', <Object?>[seasonId, cupTournamentId, seasonId, cupTournamentId, t.matchFinished]);
+    ''',
+      <Object?>[
+        seasonId,
+        cupTournamentId,
+        seasonId,
+        cupTournamentId,
+        t.matchFinished,
+      ],
+    );
     final List<int> survivors = <int>[
       for (final Map<String, Object?> row in rows)
         if (row['winner_id'] is int) row['winner_id'] as int,
     ];
     if (survivors.length < 2) return false;
-    final rowsMax = await db.rawQuery('''
+    final rowsMax = await db.rawQuery(
+      '''
       SELECT MAX(phase) AS max_phase FROM matches
       WHERE season_id = ? AND tournament_id = ?
-    ''', <Object?>[seasonId, cupTournamentId]);
-    final int? maxPhase =
-        rowsMax.isEmpty ? null : rowsMax.first['max_phase'] as int?;
+    ''',
+      <Object?>[seasonId, cupTournamentId],
+    );
+    final int? maxPhase = rowsMax.isEmpty
+        ? null
+        : rowsMax.first['max_phase'] as int?;
     if (maxPhase == null) return false;
-    final List<Map<String, Object?>> lastDateRows = await db.rawQuery('''
+    final List<Map<String, Object?>> lastDateRows = await db.rawQuery(
+      '''
       SELECT MAX(date) AS last_date FROM matches
       WHERE season_id = ? AND tournament_id = ?
-    ''', <Object?>[seasonId, cupTournamentId]);
+    ''',
+      <Object?>[seasonId, cupTournamentId],
+    );
     final String? lastDate = lastDateRows.isEmpty
         ? null
         : lastDateRows.first['last_date'] as String?;
@@ -392,12 +459,12 @@ class CareerService {
       whereArgs: <Object?>[seasonId],
       limit: 1,
     );
-    final int startYear =
-        seasonRows.isEmpty ? 2025 : (seasonRows.first['start_year'] as int? ?? 2025);
+    final int startYear = seasonRows.isEmpty
+        ? 2025
+        : (seasonRows.first['start_year'] as int? ?? 2025);
     final DateTime base =
         DateTime.tryParse(lastDate ?? '') ?? DateTime(startYear, 8, 9);
-    final DateTime date =
-        _nextWednesday(base.add(const Duration(days: 8)));
+    final DateTime date = _nextWednesday(base.add(const Duration(days: 8)));
     final int scheduled = await _gen.scheduleCupRound(
       seasonId,
       cupTournamentId,
@@ -421,10 +488,15 @@ class CareerService {
 
   /// True once every scheduled match of the season has been played.
   Future<bool> seasonComplete(int seasonId) async {
-    final int? remaining = Sqflite.firstIntValue(await db.rawQuery('''
+    final int? remaining = Sqflite.firstIntValue(
+      await db.rawQuery(
+        '''
       SELECT COUNT(*) FROM matches
       WHERE season_id = ? AND status = ?
-    ''', <Object?>[seasonId, t.matchScheduled]));
+    ''',
+        <Object?>[seasonId, t.matchScheduled],
+      ),
+    );
     return (remaining ?? 1) == 0;
   }
 
@@ -438,17 +510,22 @@ class CareerService {
     if (current == null) {
       throw StateError('No season to complete');
     }
-    final List<Tournament> tournaments =
-        await _seasonTournaments(current.seasonId);
+    final List<Tournament> tournaments = await _seasonTournaments(
+      current.seasonId,
+    );
 
     onProgress('Awarding prizes...');
+    final Set<String> titles = <String>{};
     for (final Tournament tour in tournaments) {
       if (tour.isLeague) {
-        final List<StandingRow> table =
-            await _seasons.standings(current.seasonId, tour.tournamentId);
+        final List<StandingRow> table = await _seasons.standings(
+          current.seasonId,
+          tour.tournamentId,
+        );
         if (table.isEmpty) continue;
         await _matchRepo.adjustBudget(table.first.teamId, tour.prizeTeams);
         final Team? champion = await _refs.teamById(table.first.teamId);
+        if (table.first.teamId == userTeamId) titles.add(tour.name);
         await _messages.insert(
           title: 'Champion!',
           body:
@@ -456,15 +533,19 @@ class CareerService {
           sender: 'League',
         );
       } else if (tour.isNationalCup) {
-        final rows = await db.rawQuery('''
+        final rows = await db.rawQuery(
+          '''
           SELECT winner_id, COUNT(*) AS wins FROM matches
           WHERE season_id = ? AND tournament_id = ? AND winner_id IS NOT NULL
           GROUP BY winner_id ORDER BY wins DESC LIMIT 1
-        ''', <Object?>[current.seasonId, tour.tournamentId]);
+        ''',
+          <Object?>[current.seasonId, tour.tournamentId],
+        );
         if (rows.isEmpty) continue;
         final int cupWinnerId = rows.first['winner_id'] as int;
         await _matchRepo.adjustBudget(cupWinnerId, tour.prizeTeams);
         final Team? winner = await _refs.teamById(cupWinnerId);
+        if (cupWinnerId == userTeamId) titles.add(tour.name);
         await _messages.insert(
           title: 'Cup Glory',
           body: '${winner?.name ?? 'A club'} lifts the ${tour.name} trophy.',
@@ -473,11 +554,26 @@ class CareerService {
       }
     }
 
+    onProgress('Recording season history...');
+    await _seasons.recordSeasonAwards(
+      seasonId: current.seasonId,
+      year: current.endYear,
+    );
+    await _seasons.recordCareerSeason(
+      seasonId: current.seasonId,
+      teamId: userTeamId,
+      startYear: current.startYear,
+      endYear: current.endYear,
+      championships: titles.join(', '),
+    );
+
     onProgress('Promotion and relegation...');
     for (final Tournament tour in tournaments) {
       if (!tour.isLeague) continue;
-      final List<StandingRow> table =
-          await _seasons.standings(current.seasonId, tour.tournamentId);
+      final List<StandingRow> table = await _seasons.standings(
+        current.seasonId,
+        tour.tournamentId,
+      );
       await _applyPromotionRelegation(tour, table);
     }
 
@@ -487,7 +583,9 @@ class CareerService {
     onProgress('Archiving season stats...');
     for (final Tournament tour in tournaments) {
       await _seasons.archiveSeasonTournament(
-          current.seasonId, tour.tournamentId);
+        current.seasonId,
+        tour.tournamentId,
+      );
     }
 
     onProgress('Preparing the new season...');
@@ -495,18 +593,24 @@ class CareerService {
     if (userTeam == null) {
       throw StateError('User team vanished');
     }
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT tu.* FROM tournaments tu
       JOIN tournament_countries tc ON tc.tournament_id = tu.tournament_id
       WHERE tu.organization = ? AND tc.country_id = ? AND tu.division_id = ?
       LIMIT 1
-    ''', <Object?>[t.orgLeague, userTeam.countryId, userTeam.division]);
-    final Tournament? nextLeague =
-        rows.isEmpty ? null : Tournament.fromMap(rows.first);
-    final Map<String, Object?>? cupRow =
-        await _refs.nationalCup(userTeam.countryId);
-    final Tournament? nextCup =
-        cupRow == null ? null : Tournament.fromMap(cupRow);
+    ''',
+      <Object?>[t.orgLeague, userTeam.countryId, userTeam.division],
+    );
+    final Tournament? nextLeague = rows.isEmpty
+        ? null
+        : Tournament.fromMap(rows.first);
+    final Map<String, Object?>? cupRow = await _refs.nationalCup(
+      userTeam.countryId,
+    );
+    final Tournament? nextCup = cupRow == null
+        ? null
+        : Tournament.fromMap(cupRow);
     if (nextLeague == null) {
       return current; // nothing more we can generate; provider decides.
     }
@@ -526,11 +630,14 @@ class CareerService {
   }
 
   Future<List<Tournament>> _seasonTournaments(int seasonId) async {
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT tu.* FROM season_tournaments st
       JOIN tournaments tu ON tu.tournament_id = st.tournament_id
       WHERE st.season_id = ? AND st.status = ?
-    ''', <Object?>[seasonId, t.seasonTournamentActive]);
+    ''',
+      <Object?>[seasonId, t.seasonTournamentActive],
+    );
     return rows.map(Tournament.fromMap).toList();
   }
 
@@ -550,9 +657,11 @@ class CareerService {
       }
     }
     // Relegate the bottom M (their division moves down).
-    for (int i = max(0, table.length - tour.relegationSpots);
-        i < table.length;
-        i++) {
+    for (
+      int i = max(0, table.length - tour.relegationSpots);
+      i < table.length;
+      i++
+    ) {
       final StandingRow row = table[i];
       await db.execute(
         'UPDATE teams SET division = division + 1 WHERE team_id = ?',
@@ -564,20 +673,24 @@ class CareerService {
   Future<void> _ageAndRetire() async {
     await _seasons.ageSquad();
     await db.execute(
-        'UPDATE players SET status_id = ? WHERE status_id = ? AND age >= 41',
-        <Object?>[t.statusRetired, t.statusActive]);
+      'UPDATE players SET status_id = ? WHERE status_id = ? AND age >= 41',
+      <Object?>[t.statusRetired, t.statusActive],
+    );
     // 37-40 year olds with fading power also hang up their boots.
     await db.execute(
-        '''UPDATE players SET status_id = ? WHERE status_id = ? AND age >= 37
+      '''UPDATE players SET status_id = ? WHERE status_id = ? AND age >= 37
            AND power < 55''',
-        <Object?>[t.statusRetired, t.statusActive]);
+      <Object?>[t.statusRetired, t.statusActive],
+    );
     await db.execute(
-        '''DELETE FROM team_players WHERE player_id IN (
+      '''DELETE FROM team_players WHERE player_id IN (
              SELECT player_id FROM players WHERE status_id = ?)''',
-        <Object?>[t.statusRetired]);
+      <Object?>[t.statusRetired],
+    );
     await db.execute(
-        '''UPDATE contracts SET status = 0 WHERE player_id IN (
+      '''UPDATE contracts SET status = 0 WHERE player_id IN (
              SELECT player_id FROM players WHERE status_id = ?)''',
-        <Object?>[t.statusRetired]);
+      <Object?>[t.statusRetired],
+    );
   }
 }

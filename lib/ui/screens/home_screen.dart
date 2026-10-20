@@ -7,7 +7,8 @@ import '../../state/career_provider.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'inbox_tab.dart';
-import 'market_sheet.dart';
+import 'club_hub_sheet.dart';
+import 'market_tab.dart';
 import 'match_screen.dart';
 import 'squad_tab.dart';
 import 'standings_tab.dart';
@@ -55,10 +56,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Stack(
         children: <Widget>[
-          RefreshIndicator(
-            onRefresh: game.refreshWorld,
-            child: _body(game),
-          ),
+          RefreshIndicator(onRefresh: game.refreshWorld, child: _body(game)),
           if (game.busy)
             Container(
               color: Colors.black54,
@@ -83,10 +81,6 @@ class _HomeScreenState extends State<HomeScreen> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (int i) {
-          if (i == 5) {
-            _openMarket(context);
-            return;
-          }
           setState(() => _index = i);
         },
         destinations: <Widget>[
@@ -94,10 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.outlined_flag),
             label: 'Overview',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.groups),
-            label: 'Squad',
-          ),
+          const NavigationDestination(icon: Icon(Icons.groups), label: 'Squad'),
           const NavigationDestination(
             icon: Icon(Icons.event),
             label: 'Fixtures',
@@ -129,6 +120,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return const StandingsTab();
       case 4:
         return const InboxTab();
+      case 5:
+        return const MarketTab();
       default:
         return OverviewTab(
           onPlayPressed: () => _playNext(context, game),
@@ -137,22 +130,13 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _openMarket(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => const MarketSheet(),
-    );
-  }
-
   Future<void> _playNext(BuildContext context, CareerProvider game) async {
     if (game.busy) return;
     if (game.nextUserMatch != null) {
       await game.startLiveMatch();
       if (context.mounted && game.liveSession != null) {
-        await Navigator.of(context).push(
-          MaterialPageRoute<void>(builder: (_) => const MatchScreen()),
-        );
+        await Navigator.of(context)
+            .push(MaterialPageRoute<void>(builder: (_) => const MatchScreen()));
       }
       return;
     }
@@ -162,11 +146,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
 /// Overview: next match card, quick stats, mini table and inbox preview.
 class OverviewTab extends StatelessWidget {
-  const OverviewTab({
-    super.key,
-    required this.onPlayPressed,
-    this.onOpenInbox,
-  });
+  const OverviewTab({super.key, required this.onPlayPressed, this.onOpenInbox});
 
   final VoidCallback onPlayPressed;
   final VoidCallback? onOpenInbox;
@@ -182,14 +162,23 @@ class OverviewTab extends StatelessWidget {
         _nextMatchCard(context, game, team),
         SectionCard(
           title: 'Club',
-          trailing: Text(
-            game.season?.name ?? '',
-            style: const TextStyle(fontSize: 11, color: AppTheme.textDim),
+          trailing: TextButton.icon(
+            onPressed: () => showClubHub(context),
+            icon: const Icon(Icons.info_outline, size: 15),
+            label: const Text('Club info'),
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+            ),
           ),
           child: StatChips(
             items: <Widget>[
-              statChip('Budget', money(team.budget),
-                  icon: Icons.account_balance_wallet, color: AppTheme.accent),
+              statChip(
+                'Budget',
+                money(team.budget),
+                icon: Icons.account_balance_wallet,
+                color: AppTheme.accent,
+              ),
               statChip('Power', '${team.power}', icon: Icons.bolt),
               statChip('Position', _position(game)),
               statChip('Week', '${game.week + 1}', icon: Icons.date_range),
@@ -214,8 +203,9 @@ class OverviewTab extends StatelessWidget {
     FixtureMatch? mine = game.nextUserMatch;
     Team? opponent;
     if (mine != null) {
-      final int opponentId =
-          mine.homeTeamId == game.userTeamId ? mine.awayTeamId : mine.homeTeamId;
+      final int opponentId = mine.homeTeamId == game.userTeamId
+          ? mine.awayTeamId
+          : mine.homeTeamId;
       opponent = game.teamCache[opponentId];
     }
     return Card(
@@ -244,18 +234,24 @@ class OverviewTab extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: <Widget>[
                     Expanded(
-                        child: _teamColumn(team,
-                            isHome: game.nextUserMatch!.homeTeamId ==
-                                team.teamId)),
+                      child: _teamColumn(
+                        team,
+                        isHome: game.nextUserMatch!.homeTeamId == team.teamId,
+                      ),
+                    ),
                     Text(
                       'VS',
                       style: TextStyle(
-                          fontWeight: FontWeight.w900, color: AppTheme.accent),
+                        fontWeight: FontWeight.w900,
+                        color: AppTheme.accent,
+                      ),
                     ),
                     Expanded(
-                        child: _teamColumn(opponent,
-                            isHome: game.nextUserMatch!.awayTeamId ==
-                                team.teamId)),
+                      child: _teamColumn(
+                        opponent,
+                        isHome: game.nextUserMatch!.awayTeamId == team.teamId,
+                      ),
+                    ),
                   ],
                 ),
               )
@@ -276,9 +272,11 @@ class OverviewTab extends StatelessWidget {
                   child: SizedBox(
                     height: 48,
                     child: FilledButton.icon(
-                      icon: Icon(game.nextUserMatch != null
-                          ? Icons.play_circle
-                          : Icons.fast_forward),
+                      icon: Icon(
+                        game.nextUserMatch != null
+                            ? Icons.play_circle
+                            : Icons.fast_forward,
+                      ),
                       label: Text(
                         game.nextUserMatch != null
                             ? 'Play Match'
@@ -306,57 +304,53 @@ class OverviewTab extends StatelessWidget {
   }
 
   Widget _teamColumn(Team t, {required bool isHome}) => Column(
-        children: <Widget>[
-          CrestAvatar(team: t, radius: 22),
-          const SizedBox(height: 6),
-          Text(
-            t.name,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
-          ),
-          Text('#${t.power}',
-              style: const TextStyle(fontSize: 10, color: AppTheme.textDim)),
-        ],
-      );
+    children: <Widget>[
+      CrestAvatar(team: t, radius: 22),
+      const SizedBox(height: 6),
+      Text(
+        t.name,
+        textAlign: TextAlign.center,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+      ),
+      Text(
+        '#${t.power}',
+        style: const TextStyle(fontSize: 10, color: AppTheme.textDim),
+      ),
+    ],
+  );
 
   Widget _unreadInboxCard(
     BuildContext context,
     CareerProvider game, {
     VoidCallback? onOpenInbox,
   }) => Card(
-        child: ListTile(
-          leading: Badge(
-            isLabelVisible: game.unreadCount > 0,
-            label: Text('${game.unreadCount}'),
-            child: const Icon(Icons.mail_outline),
-          ),
-          title: const Text(
-            'Inbox',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-          ),
-          subtitle: Text(
-            game.inbox.isEmpty
-                ? 'No messages yet'
-                : game.inbox.first.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11),
-          ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: onOpenInbox,
-        ),
-      );
+    child: ListTile(
+      leading: Badge(
+        isLabelVisible: game.unreadCount > 0,
+        label: Text('${game.unreadCount}'),
+        child: const Icon(Icons.mail_outline),
+      ),
+      title: const Text(
+        'Inbox',
+        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+      ),
+      subtitle: Text(
+        game.inbox.isEmpty ? 'No messages yet' : game.inbox.first.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 11),
+      ),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: onOpenInbox,
+    ),
+  );
 }
 
 /// Small standings snippet on the overview.
 class MiniStandingsCard extends StatelessWidget {
-  const MiniStandingsCard({
-    super.key,
-    required this.game,
-    required this.team,
-  });
+  const MiniStandingsCard({super.key, required this.game, required this.team});
 
   final CareerProvider game;
   final Team team;
@@ -364,14 +358,12 @@ class MiniStandingsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<StandingRow> rows = game.standings.take(5).toList();
-    final int userIndex = game.standings
-        .indexWhere((StandingRow r) => r.teamId == game.userTeamId);
+    final int userIndex = game.standings.indexWhere(
+      (StandingRow r) => r.teamId == game.userTeamId,
+    );
     late final List<StandingRow> display;
     if (userIndex >= 5) {
-      display = <StandingRow>[
-        ...rows,
-        game.standings[userIndex],
-      ];
+      display = <StandingRow>[...rows, game.standings[userIndex]];
     } else {
       if (userIndex < 0) {
         display = rows;

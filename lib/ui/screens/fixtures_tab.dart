@@ -42,11 +42,15 @@ class _FixturesTabState extends State<FixturesTab> {
       return const Center(child: Text('No fixtures yet'));
     }
     // Group by tournament + round.
-    final Map<String, List<FixtureMatch>> groups = <String, List<FixtureMatch>>{};
+    final Map<String, List<FixtureMatch>> groups =
+        <String, List<FixtureMatch>>{};
+    final int maxCupPhase = list
+        .where((FixtureMatch m) => m.tournamentId == cupTournamentId)
+        .fold(1, (int best, FixtureMatch m) => m.phase > best ? m.phase : best);
     for (final FixtureMatch m in list) {
       final bool isCup = m.tournamentId == cupTournamentId;
       final String key = isCup
-          ? 'Cup · ${_phaseName(m.phase)}'
+          ? 'Cup · ${_phaseName(m.phase, maxCupPhase)}'
           : 'League · Round ${m.round}';
       groups.putIfAbsent(key, () => <FixtureMatch>[]).add(m);
     }
@@ -59,8 +63,10 @@ class _FixturesTabState extends State<FixturesTab> {
         itemBuilder: (BuildContext context, int index) {
           final String key = keys[index];
           final List<FixtureMatch> group = groups[key]!
-            ..sort((FixtureMatch a, FixtureMatch b) =>
-                (a.date ?? '').compareTo(b.date ?? ''));
+            ..sort(
+              (FixtureMatch a, FixtureMatch b) =>
+                  (a.date ?? '').compareTo(b.date ?? ''),
+            );
           final DateTime? date = DateTime.tryParse(group.first.date ?? '');
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -96,7 +102,9 @@ class _FixturesTabState extends State<FixturesTab> {
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: involvesUser ? AppTheme.accentDim.withAlpha(70) : AppTheme.surfaceCard,
+        color: involvesUser
+            ? AppTheme.accentDim.withAlpha(70)
+            : AppTheme.surfaceCard,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -144,17 +152,28 @@ class _FixturesTabState extends State<FixturesTab> {
 
   static String _formatDate(DateTime d) {
     const List<String> months = <String>[
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${d.day} ${months[d.month - 1]}';
   }
 
-  static String _phaseName(int phase) => switch (phase) {
-        1 => 'Round of 32',
-        2 => 'Round of 16',
-        3 => 'Quarter-finals',
-        4 => 'Semi-finals',
-        _ => 'Final',
-      };
+  /// Bracket rounds are labelled from the number of teams still involved, so
+  /// trimmed brackets (32, 16, 8 clubs...) still get the right round names.
+  static String _phaseName(int phase, int maxPhase) {
+    final int teamsLeft = 1 << (maxPhase - phase + 1);
+    if (teamsLeft <= 2) return 'Final';
+    if (teamsLeft == 4) return 'Semi-finals';
+    return 'Round of $teamsLeft';
+  }
 }

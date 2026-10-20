@@ -10,6 +10,8 @@ const String teams = 'teams';
 const String coaches = 'coaches';
 const String stadiums = 'stadiums';
 const String teamPlayers = 'team_players';
+const String teamTactics = 'team_tactics';
+const String teamTraining = 'team_training';
 const String teamLoans = 'team_loans';
 const String countryCoaches = 'country_coaches';
 const String countryCallups = 'country_callups';
@@ -76,3 +78,8 @@ const int marketOnLoan = 3;
 const int statusActive = 1;
 const int statusRetired = 2;
 const int statusDead = 3;
+
+// ---------------------------------------------- player_awards.type values
+const int awardTopScorer = 1;
+const int awardMvp = 2;
+const int awardYoungPlayer = 3;

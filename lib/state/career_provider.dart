@@ -13,8 +13,10 @@ import '../data/repositories/reference_repository.dart';
 import '../data/repositories/season_repository.dart';
 import '../data/repositories/squad_repository.dart';
 import '../game/career_service.dart';
+import '../game/formation.dart';
 import '../game/match_engine.dart';
 import '../game/season_generator.dart';
+import '../game/training.dart';
 
 /// Presentation-facing career state. One instance lives above the app and
 /// notifies widgets whenever the career world changes.
@@ -47,6 +49,16 @@ class CareerProvider extends ChangeNotifier {
   String? nextDate;
   List<FixtureMatch> matchesToday = <FixtureMatch>[];
   List<StandingRow> standings = <StandingRow>[];
+  List<LeaderRow> topScorers = <LeaderRow>[];
+  List<LeaderRow> topAssists = <LeaderRow>[];
+  List<LeaderRow> topCleanSheets = <LeaderRow>[];
+  List<LeaderRow> topRated = <LeaderRow>[];
+
+  /// User club leaderboards and the tactic chosen for the next match.
+  List<LeaderRow> clubTopScorers = <LeaderRow>[];
+  List<LeaderRow> clubTopAssists = <LeaderRow>[];
+  List<LeaderRow> clubTopRated = <LeaderRow>[];
+  Formation formation = Formation.f442;
   List<Message> inbox = <Message>[];
   int unreadCount = 0;
   int week = 0;
@@ -104,14 +116,19 @@ class CareerProvider extends ChangeNotifier {
       return;
     }
     league = await _leagueFor(userTeam!);
-    final Map<String, Object?>? cupRow = await _refs.nationalCup(userTeam!.countryId);
+    final Map<String, Object?>? cupRow = await _refs.nationalCup(
+      userTeam!.countryId,
+    );
     cup = cupRow == null ? null : Tournament.fromMap(cupRow);
     // Cache every team that participates this season.
-    final rows = await _db.rawQuery('''
+    final rows = await _db.rawQuery(
+      '''
       SELECT tm.* FROM season_teams st
       JOIN teams tm ON tm.team_id = st.team_id
       WHERE st.season_id = ?
-    ''', <Object?>[season!.seasonId]);
+    ''',
+      <Object?>[season!.seasonId],
+    );
     teamCache = <int, Team>{
       for (final Map<String, Object?> row in rows)
         row['team_id'] as int: Team.fromMap(row),
@@ -130,18 +147,22 @@ class CareerProvider extends ChangeNotifier {
   }
 
   Future<Tournament?> _leagueFor(Team team) async {
-    final rows = await _db.rawQuery('''
+    final rows = await _db.rawQuery(
+      '''
       SELECT tu.* FROM tournaments tu
       JOIN tournament_countries tc ON tc.tournament_id = tu.tournament_id
       WHERE tu.organization = ? AND tc.country_id = ? AND tu.division_id = ?
       LIMIT 1
-    ''', <Object?>[t.orgLeague, team.countryId, team.division]);
+    ''',
+      <Object?>[t.orgLeague, team.countryId, team.division],
+    );
     return rows.isEmpty ? null : Tournament.fromMap(rows.first);
   }
 
   // -------------------------------------------------------------- setup flow
 
-  Future<List<Map<String, Object?>>> playableCountries() => _refs.playableCountries();
+  Future<List<Map<String, Object?>>> playableCountries() =>
+      _refs.playableCountries();
 
   Future<Tournament?> tournamentById(int id) => _refs.tournamentById(id);
 
@@ -149,20 +170,27 @@ class CareerProvider extends ChangeNotifier {
       _refs.leaguesForCountry(countryId);
 
   Future<List<Map<String, Object?>>> teamsForLeague(
-      int countryId, int divisionId) async {
+    int countryId,
+    int divisionId,
+  ) async {
     final Map<String, Object?>? cupRow = await _refs.nationalCup(countryId);
     cup = cupRow == null ? null : Tournament.fromMap(cupRow);
-    return _refs.teamsForDivision(countryId, divisionId)
-        .then((List<Team> list) => list
-            .map((Team tm) => <String, Object?>{
+    return _refs
+        .teamsForDivision(countryId, divisionId)
+        .then(
+          (List<Team> list) => list
+              .map(
+                (Team tm) => <String, Object?>{
                   'team_id': tm.teamId,
                   'name': tm.name,
                   'power': tm.power,
                   'value': tm.value,
                   'budget': tm.budget,
                   'division': tm.division,
-                })
-            .toList());
+                },
+              )
+              .toList(),
+        );
   }
 
   /// Generates the whole season for a brand new career.
@@ -175,12 +203,18 @@ class CareerProvider extends ChangeNotifier {
     busy = true;
     onProgress('Registering teams...');
     final Map<String, Object?>? cupRow = await _refs.nationalCup(countryId);
-    final Tournament? cupTournament =
-        cupRow == null ? null : Tournament.fromMap(cupRow);
+    final Tournament? cupTournament = cupRow == null
+        ? null
+        : Tournament.fromMap(cupRow);
     final String label = 'Generating fixtures...';
     onProgress(label);
-    await _serviceCareerGeneration(countryId, leagueTournament, cupTournament,
-        teamId, onProgress);
+    await _serviceCareerGeneration(
+      countryId,
+      leagueTournament,
+      cupTournament,
+      teamId,
+      onProgress,
+    );
     busy = false;
     notifyListeners();
   }
@@ -194,10 +228,10 @@ class CareerProvider extends ChangeNotifier {
   ) async {
     final CareerPlan plan = await SeasonGenerator(_db, random: _rng)
         .generateCareer(
-      countryId: countryId,
-      league: leagueTournament,
-      cup: cupTournament,
-    );
+          countryId: countryId,
+          league: leagueTournament,
+          cup: cupTournament,
+        );
     onProgress('Saving career...');
     // Persist the manager pick for continuation across restarts.
     await _db.insert(t.careerHistory, <String, Object?>{
@@ -210,11 +244,14 @@ class CareerProvider extends ChangeNotifier {
     userTeam = await _refs.teamById(teamId);
     league = leagueTournament;
     cup = cupTournament;
-    final rows = await _db.rawQuery('''
+    final rows = await _db.rawQuery(
+      '''
       SELECT tm.* FROM season_teams st
       JOIN teams tm ON tm.team_id = st.team_id
       WHERE st.season_id = ?
-    ''', <Object?>[plan.season.seasonId]);
+    ''',
+      <Object?>[plan.season.seasonId],
+    );
     teamCache = <int, Team>{
       for (final Map<String, Object?> row in rows)
         row['team_id'] as int: Team.fromMap(row),
@@ -235,8 +272,33 @@ class CareerProvider extends ChangeNotifier {
     matchesToday = nextDate == null
         ? <FixtureMatch>[]
         : await _service.matchesOnDate(season!.seasonId, nextDate!);
+    formation = Formation.parse(await _squads.formationForTeam(userTeamId));
     if (league != null) {
-      standings = await _seasons.standings(season!.seasonId, league!.tournamentId);
+      final int seasonId = season!.seasonId;
+      final int tournamentId = league!.tournamentId;
+      standings = await _seasons.standings(seasonId, tournamentId);
+      topScorers = await _seasons.topScorers(seasonId, tournamentId);
+      topAssists = await _seasons.topAssists(seasonId, tournamentId);
+      topCleanSheets = await _seasons.topCleanSheets(seasonId, tournamentId);
+      topRated = await _seasons.topRated(seasonId, tournamentId);
+      clubTopScorers = await _seasons.topScorers(
+        seasonId,
+        tournamentId,
+        teamId: userTeamId,
+        limit: 5,
+      );
+      clubTopAssists = await _seasons.topAssists(
+        seasonId,
+        tournamentId,
+        teamId: userTeamId,
+        limit: 5,
+      );
+      clubTopRated = await _seasons.topRated(
+        seasonId,
+        tournamentId,
+        teamId: userTeamId,
+        limit: 5,
+      );
     }
     inbox = await _messages.latest(teamId: userTeamId);
     unreadCount = inbox.where((Message m) => !m.isRead).length;
@@ -263,8 +325,10 @@ class CareerProvider extends ChangeNotifier {
   Future<void> startLiveMatch() async {
     final FixtureMatch? mine = nextUserMatch;
     if (mine == null || season == null) return;
-    final MatchResult result =
-        await _service.simulateMatch(mine, recordEvents: true);
+    final MatchResult result = await _service.simulateMatch(
+      mine,
+      recordEvents: true,
+    );
     liveSession = LiveMatchSession(
       match: mine,
       result: result,
@@ -343,9 +407,71 @@ class CareerProvider extends ChangeNotifier {
 
   Future<List<Player>> squadForUser() => _squads.squadForTeam(userTeamId);
 
+  Future<Map<int, int>> suspensionsForUser() =>
+      _squads.suspensionsForTeam(userTeamId);
+
+  /// Extends a squad player's contract; returns an error message on failure.
+  Future<String?> renewContract(int playerId) async {
+    if (season == null) return 'No season loaded.';
+    final String? error = await _squads.renewContract(
+      playerId: playerId,
+      teamId: userTeamId,
+      currentYear: season!.endYear,
+    );
+    if (error == null) await refreshWorld();
+    return error;
+  }
+
+  Future<TrainingState> trainingState() => _squads.trainingStatus(
+    teamId: userTeamId,
+    seasonId: season?.seasonId ?? 0,
+  );
+
+  Future<TrainingOutcome> runTraining(TrainingFocus focus) async {
+    if (season == null) {
+      return const TrainingOutcome(error: 'No season loaded.');
+    }
+    final TrainingOutcome outcome = await _squads.runTraining(
+      teamId: userTeamId,
+      seasonId: season!.seasonId,
+      focus: focus,
+    );
+    if (outcome.ok) await refreshWorld();
+    return outcome;
+  }
+
+  Future<PlayerDetail?> playerDetail(int playerId) =>
+      _squads.playerDetail(playerId, seasonId: season?.seasonId);
+
+  Future<ClubOverview?> clubOverview() => _squads.clubOverview(userTeamId);
+
+  Future<ClubHistory> clubHistory() async {
+    final List<CareerSeason> seasons = await _seasons.careerHistory(userTeamId);
+    final List<PlayerAward> awards = await _seasons.clubAwards(userTeamId);
+    return ClubHistory(seasons: seasons, awards: awards);
+  }
+
+  /// Expands the stadium one step and refreshes the career world on success.
+  Future<String?> expandStadium() async {
+    final String? error = await _squads.expandStadium(userTeamId);
+    if (error == null) await refreshWorld();
+    return error;
+  }
+
+  Future<List<TransferRecord>> transferHistory() =>
+      _squads.transferHistory(userTeamId);
+
+  /// Saves the tactic used for the next match.
+  Future<void> setFormation(Formation f) async {
+    formation = f;
+    await _squads.setFormation(userTeamId, f.name);
+    notifyListeners();
+  }
+
   Future<void> toggleSquadStatus(Player p) async {
-    final int newStatus =
-        p.squadStatus == t.squadFirstTeam ? t.squadReserve : t.squadFirstTeam;
+    final int newStatus = p.squadStatus == t.squadFirstTeam
+        ? t.squadReserve
+        : t.squadFirstTeam;
     await _squads.setSquadStatus(p.playerId, newStatus);
     await refreshWorld();
   }
@@ -366,12 +492,11 @@ class CareerProvider extends ChangeNotifier {
   Future<List<Map<String, Object?>>> marketPlayers({
     String? search,
     int? positionType,
-  }) =>
-      _squads.marketPlayers(
-        search: search,
-        positionType: positionType,
-        excludeTeamId: userTeamId,
-      );
+  }) => _squads.marketPlayers(
+    search: search,
+    positionType: positionType,
+    excludeTeamId: userTeamId,
+  );
 
   Future<String?> buyPlayer(Map<String, Object?> row) async {
     final Player player = Player(
@@ -379,6 +504,7 @@ class CareerProvider extends ChangeNotifier {
       name: row['name'] as String,
       age: (row['age'] as int?) ?? 18,
       positionId: (row['position_id'] as int?) ?? 1,
+      profile: (row['profile'] as String?) ?? 'D',
       power: (row['power'] as int?) ?? 50,
       potential: (row['potential'] as int?) ?? 50,
       fitness: (row['fitness'] as int?) ?? 100,

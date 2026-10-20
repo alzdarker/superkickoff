@@ -63,20 +63,24 @@ class SeasonGenerator {
     final int teamCount = leagueTeams.length;
     final int rounds = teamCount >= 2 ? (teamCount - 1) * 2 : 0;
     final List<FixtureSlot> slots = doubleRoundRobin(
-        leagueTeams.map((Team tm) => tm.teamId).toList(), _rng);
+      leagueTeams.map((Team tm) => tm.teamId).toList(),
+      _rng,
+    );
 
     final List<Map<String, Object?>> matchRows = <Map<String, Object?>>[];
     for (final FixtureSlot slot in slots) {
-      matchRows.add(_matchRow(
-        season.seasonId,
-        league.tournamentId,
-        allTeams[slot.home]!,
-        allTeams[slot.away]!,
-        round: slot.round,
-        phase: 1,
-        leg: slot.leg,
-        date: _iso(_leagueDate(slot.round)),
-      ));
+      matchRows.add(
+        _matchRow(
+          season.seasonId,
+          league.tournamentId,
+          allTeams[slot.home]!,
+          allTeams[slot.away]!,
+          round: slot.round,
+          phase: 1,
+          leg: slot.leg,
+          date: _iso(_leagueDate(slot.round)),
+        ),
+      );
     }
 
     // ------------------------------------------------ cup first round
@@ -119,7 +123,10 @@ class SeasonGenerator {
     required Map<int, Team> allTeams,
   }) async {
     final List<int> ids = List<int>.of(survivors)
-      ..sort((int a, int b) => (allTeams[b]?.power ?? 0).compareTo(allTeams[a]?.power ?? 0));
+      ..sort(
+        (int a, int b) =>
+            (allTeams[b]?.power ?? 0).compareTo(allTeams[a]?.power ?? 0),
+      );
     final List<Map<String, Object?>> rows = <Map<String, Object?>>[];
     while (ids.length > 1) {
       // Pair strongest vs weakest for balance.
@@ -128,16 +135,18 @@ class SeasonGenerator {
       final Team? homeTeam = allTeams[a];
       final Team? awayTeam = allTeams[b];
       if (homeTeam == null || awayTeam == null) continue;
-      rows.add(_matchRow(
-        seasonId,
-        cupTournamentId,
-        homeTeam,
-        awayTeam,
-        round: phase,
-        phase: 0,
-        leg: 1,
-        date: _iso(date),
-      ));
+      rows.add(
+        _matchRow(
+          seasonId,
+          cupTournamentId,
+          homeTeam,
+          awayTeam,
+          round: phase,
+          phase: phase,
+          leg: 1,
+          date: _iso(date),
+        ),
+      );
     }
     await _insertMatches(rows);
     return rows.length;
@@ -152,8 +161,12 @@ class SeasonGenerator {
       'end_year': startYear + 1,
     };
     final int id = await db.insert(t.seasons, values);
-    final rows = await db
-        .query(t.seasons, where: 'season_id = ?', whereArgs: <Object?>[id], limit: 1);
+    final rows = await db.query(
+      t.seasons,
+      where: 'season_id = ?',
+      whereArgs: <Object?>[id],
+      limit: 1,
+    );
     return Season.fromMap(rows.first);
   }
 
@@ -203,7 +216,8 @@ class SeasonGenerator {
     });
   }
 
-  DateTime _leagueDate(int round) => _startDate.add(Duration(days: 7 * (round - 1)));
+  DateTime _leagueDate(int round) =>
+      _startDate.add(Duration(days: 7 * (round - 1)));
 
   /// Cup is on Wednesdays, interleaved: phase 1 mid-week before half-time.
   DateTime _cupDate(int phase, int leagueRounds) {

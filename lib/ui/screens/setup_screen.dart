@@ -52,8 +52,9 @@ class _SetupScreenState extends State<SetupScreen> {
       selectedCountry = country;
       loadingOptions = true;
     });
-    final List<Map<String, Object?>> leagues =
-        await game.leaguesForCountry(country['country_id'] as int);
+    final List<Map<String, Object?>> leagues = await game.leaguesForCountry(
+      country['country_id'] as int,
+    );
     if (!mounted) return;
     setState(() {
       leagueOptions = leagues;
@@ -85,7 +86,8 @@ class _SetupScreenState extends State<SetupScreen> {
       generationProgress = 0;
     });
     final Tournament leagueTournament = await _tournamentById(
-        selectedLeague!['tournament_id'] as int);
+      selectedLeague!['tournament_id'] as int,
+    );
     try {
       await game.startCareer(
         countryId: selectedCountry!['country_id'] as int,
@@ -130,26 +132,28 @@ class _SetupScreenState extends State<SetupScreen> {
   }
 
   Widget _generatingBody() => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            CircularProgressIndicator(value: generationProgress > 0.05 ? generationProgress : null),
-            const SizedBox(height: 18),
-            Text(generationStatus.isEmpty
-                ? 'Preparing world...'
-                : generationStatus),
-            const SizedBox(height: 8),
-            const Text(
-              'This bundles fixtures for every club in the season.',
-              style: TextStyle(fontSize: 11, color: AppTheme.textDim),
-            ),
-            if (error != null) ...<Widget>[
-              const SizedBox(height: 18),
-              Text(error!, style: const TextStyle(color: AppTheme.danger)),
-            ],
-          ],
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        CircularProgressIndicator(
+          value: generationProgress > 0.05 ? generationProgress : null,
         ),
-      );
+        const SizedBox(height: 18),
+        Text(
+          generationStatus.isEmpty ? 'Preparing world...' : generationStatus,
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'This bundles fixtures for every club in the season.',
+          style: TextStyle(fontSize: 11, color: AppTheme.textDim),
+        ),
+        if (error != null) ...<Widget>[
+          const SizedBox(height: 18),
+          Text(error!, style: const TextStyle(color: AppTheme.danger)),
+        ],
+      ],
+    ),
+  );
 
   Widget _stepsBody() {
     switch (step) {
@@ -165,27 +169,29 @@ class _SetupScreenState extends State<SetupScreen> {
   // ---------------------------------------------------------------- steps
 
   Widget _countryStep() => _optionList(
-        title: 'Choose a country',
-        subtitle: 'Sorted alphabetically by country',
-        options: countryOptions,
-        headline: (Map<String, Object?> o) => o['name'].toString(),
-        subline: (Map<String, Object?> o) =>
-            '${o['team_count']} clubs • ${o['league_count']} leagues • power ${(o['power'] as int?) ?? 0}',
-        trailing: (Map<String, Object?> o) =>
-            Text((o['iso2'] ?? '') as String, style: const TextStyle(color: AppTheme.textDim)),
-        onPick: _selectCountry,
-        emptyHint: 'No countries loaded',
-      );
+    title: 'Choose a country',
+    subtitle: 'Sorted alphabetically by country',
+    options: countryOptions,
+    headline: (Map<String, Object?> o) => o['name'].toString(),
+    subline: (Map<String, Object?> o) =>
+        '${o['team_count']} clubs • ${o['league_count']} leagues • power ${(o['power'] as int?) ?? 0}',
+    trailing: (Map<String, Object?> o) => Text(
+      (o['iso2'] ?? '') as String,
+      style: const TextStyle(color: AppTheme.textDim),
+    ),
+    onPick: _selectCountry,
+    emptyHint: 'No countries loaded',
+  );
 
   Widget _leagueStep() => _optionList(
-        title: 'Choose a league',
-        subtitle: 'Only free leagues can be selected (see PRD quotas)',
-        options: leagueOptions,
-        headline: (Map<String, Object?> o) => o['name'].toString(),
-        subline: (Map<String, Object?> o) => '${o['team_count']} clubs',
-        onPick: _selectLeague,
-        emptyHint: 'No leagues for this country',
-      );
+    title: 'Choose a league',
+    subtitle: 'Only free leagues can be selected (see PRD quotas)',
+    options: leagueOptions,
+    headline: (Map<String, Object?> o) => o['name'].toString(),
+    subline: (Map<String, Object?> o) => '${o['team_count']} clubs',
+    onPick: _selectLeague,
+    emptyHint: 'No leagues for this country',
+  );
 
   Widget _teamStep() {
     return Column(
@@ -260,11 +266,17 @@ class _SetupScreenState extends State<SetupScreen> {
       children: <Widget>[
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          child: Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+          ),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Text(subtitle, style: const TextStyle(fontSize: 12, color: AppTheme.textDim)),
+          child: Text(
+            subtitle,
+            style: const TextStyle(fontSize: 12, color: AppTheme.textDim),
+          ),
         ),
         if (loadingOptions)
           const Expanded(child: Center(child: CircularProgressIndicator()))

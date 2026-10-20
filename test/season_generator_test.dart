@@ -18,8 +18,11 @@ void main() {
     databaseFactory = databaseFactoryFfi;
     tempDir = await Directory.systemTemp.createTemp('superkickoff_test_');
     final File source = File(p.join('assets', 'data', 'superkickoff_2025.db'));
-    expect(source.existsSync(), isTrue,
-        reason: 'Bundled database asset must exist');
+    expect(
+      source.existsSync(),
+      isTrue,
+      reason: 'Bundled database asset must exist',
+    );
     final File target = File(p.join(tempDir.path, 'test.db'));
     await source.copy(target.path);
     db = await databaseFactory.openDatabase(
@@ -38,43 +41,53 @@ void main() {
     required int organization,
     int? divisionId,
   }) async {
-    final List<Map<String, Object?>> rows = await db.rawQuery('''
+    final List<Map<String, Object?>> rows = await db.rawQuery(
+      '''
       SELECT tu.* FROM tournaments tu
       JOIN tournament_countries tc ON tc.tournament_id = tu.tournament_id
       WHERE tc.country_id = ?
         AND tu.organization = ?
         ${divisionId == null ? '' : 'AND tu.division_id = ?'}
       LIMIT 1
-    ''', <Object?>[
-      countryId,
-      organization,
-      ?divisionId,
-    ]);
-    expect(rows, isNotEmpty,
-        reason: 'No tournament organization=$organization for country $countryId');
+    ''',
+      <Object?>[countryId, organization, ?divisionId],
+    );
+    expect(
+      rows,
+      isNotEmpty,
+      reason: 'No tournament organization=$organization for country $countryId',
+    );
     return rows.first;
   }
 
   test('generates a full league + cup season', () async {
     const int countryId = 141; // Mexico, known to have an 18-team league.
-    final Tournament league =
-        Tournament.fromMap(await findTournament(
-      countryId: countryId,
-      organization: t.orgLeague,
-      divisionId: 1,
-    ));
-    final Tournament cup = Tournament.fromMap(await findTournament(
-      countryId: countryId,
-      organization: t.orgNationalCup,
-    ));
+    final Tournament league = Tournament.fromMap(
+      await findTournament(
+        countryId: countryId,
+        organization: t.orgLeague,
+        divisionId: 1,
+      ),
+    );
+    final Tournament cup = Tournament.fromMap(
+      await findTournament(
+        countryId: countryId,
+        organization: t.orgNationalCup,
+      ),
+    );
 
-    final CareerPlan plan = await SeasonGenerator(db, random: null)
-        .generateCareer(countryId: countryId, league: league, cup: cup);
+    final CareerPlan plan = await SeasonGenerator(
+      db,
+      random: null,
+    ).generateCareer(countryId: countryId, league: league, cup: cup);
 
     expect(plan.teamCount, greaterThanOrEqualTo(18));
     expect(plan.leagueRounds, 34);
-    expect(plan.matchCount, 306,
-        reason: '18-team double round robin: 34 rounds x 9 games');
+    expect(
+      plan.matchCount,
+      306,
+      reason: '18-team double round robin: 34 rounds x 9 games',
+    );
 
     final List<Map<String, Object?>> seasons = await db.query(t.seasons);
     expect(seasons.length, 1);
@@ -85,8 +98,11 @@ void main() {
       where: 'season_id = ?',
       whereArgs: <Object?>[plan.season.seasonId],
     );
-    expect(registered.length, greaterThanOrEqualTo(18),
-        reason: 'every cup participant is registered for the season');
+    expect(
+      registered.length,
+      greaterThanOrEqualTo(18),
+      reason: 'every cup participant is registered for the season',
+    );
 
     final List<Map<String, Object?>> matches = await db.query(
       t.matches,

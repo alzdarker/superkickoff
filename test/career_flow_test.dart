@@ -45,33 +45,34 @@ void main() {
 
   test('plays a full season and starts the next one', () async {
     const int countryId = 141; // Mexico.
-    final List<Map<String, Object?>> leagueRows = await db.rawQuery('''
+    final List<Map<String, Object?>> leagueRows = await db.rawQuery(
+      '''
       SELECT tu.* FROM tournaments tu
       JOIN tournament_countries tc ON tc.tournament_id = tu.tournament_id
       WHERE tc.country_id = ? AND tu.organization = ? AND tu.division_id = 1
       LIMIT 1
-    ''', <Object?>[countryId, t.orgLeague]);
-    final List<Map<String, Object?>> cupRows = await db.rawQuery('''
+    ''',
+      <Object?>[countryId, t.orgLeague],
+    );
+    final List<Map<String, Object?>> cupRows = await db.rawQuery(
+      '''
       SELECT tu.* FROM tournaments tu
       JOIN tournament_countries tc ON tc.tournament_id = tu.tournament_id
       WHERE tc.country_id = ? AND tu.organization = ?
       LIMIT 1
-    ''', <Object?>[countryId, t.orgNationalCup]);
+    ''',
+      <Object?>[countryId, t.orgNationalCup],
+    );
     final Tournament league = Tournament.fromMap(leagueRows.first);
     final Tournament cup = Tournament.fromMap(cupRows.first);
 
-    // ignore: avoid_print
-    print('generating career...');
-    final SeasonGenerator generator =
-        SeasonGenerator(db, random: Random(11));
+    final SeasonGenerator generator = SeasonGenerator(db, random: Random(11));
     final CareerPlan plan = await generator.generateCareer(
       countryId: countryId,
       league: league,
       cup: cup,
     );
     final int seasonId = plan.season.seasonId;
-    // ignore: avoid_print
-    print('career generated: season $seasonId, ${plan.matchCount} league matches');
 
     final ReferenceRepository refs = ReferenceRepository(db);
     final SeasonRepository seasons = SeasonRepository(db);
@@ -94,6 +95,9 @@ void main() {
     final List<Team> clubs = await refs.teamsForDivision(countryId, 1);
     expect(clubs.length, 18);
     final Team userClub = clubs.first;
+    expect(await squads.formationForTeam(userClub.teamId), '4-4-2');
+    await squads.setFormation(userClub.teamId, '4-3-3');
+    expect(await squads.formationForTeam(userClub.teamId), '4-3-3');
     await db.insert(t.careerHistory, <String, Object?>{
       'team_id': userClub.teamId,
       'season_id': seasonId,
@@ -105,13 +109,36 @@ void main() {
         team.teamId: team,
     };
 
+    // Watch one match live so incidents/events are persisted too.
+    final String firstDate = (await service.nextMatchDate(seasonId))!;
+    final List<FixtureMatch> firstFixtures = await service.matchesOnDate(
+      seasonId,
+      firstDate,
+    );
+    final FixtureMatch liveFixture = firstFixtures.firstWhere(
+      (FixtureMatch m) =>
+          m.homeTeamId == userClub.teamId || m.awayTeamId == userClub.teamId,
+    );
+    await service.simulateMatch(liveFixture, recordEvents: true);
+
+    final List<Map<String, Object?>> playedRows = await db.rawQuery(
+      'SELECT player_id FROM match_players '
+      'WHERE match_id = ? AND minutes > 0 LIMIT 1',
+      <Object?>[liveFixture.matchId],
+    );
+    final PlayerDetail? profile = await squads.playerDetail(
+      playedRows.first['player_id'] as int,
+      seasonId: seasonId,
+    );
+    expect(profile, isNotNull);
+    expect(profile!.stats.matches, greaterThan(0));
+    expect(profile.stats.minutes, greaterThan(0));
+
     int matchdays = 0;
     while (!await service.seasonComplete(seasonId)) {
       final String? date = await service.nextMatchDate(seasonId);
       expect(date, isNotNull, reason: 'season incomplete but no fixture date');
 
-      // ignore: avoid_print
-      print('matchday $matchdays date=$date');
       final Map<int, MatchResult> results = await service.simulateMatchday(
         seasonId: seasonId,
         date: date!,
@@ -131,15 +158,59 @@ void main() {
       expect(matchdays, lessThan(120), reason: 'season is not converging');
     }
     expect(matchdays, greaterThan(30));
-    // ignore: avoid_print
-    print('season finished after $matchdays matchdays');
 
     // ---------------------------------------------------------- standings
-    final List<StandingRow> table =
-        await seasons.standings(seasonId, league.tournamentId);
+    final List<StandingRow> table = await seasons.standings(
+      seasonId,
+      league.tournamentId,
+    );
     expect(table.length, 18);
     expect(table.every((StandingRow row) => row.played == 34), isTrue);
     expect(table.first.points, greaterThanOrEqualTo(table.last.points));
+
+    // --------------------------------------------------------- leaderboards
+    final List<LeaderRow> scorers = await seasons.topScorers(
+      seasonId,
+      league.tournamentId,
+    );
+    final List<LeaderRow> assists = await seasons.topAssists(
+      seasonId,
+      league.tournamentId,
+    );
+    final List<LeaderRow> cleanSheets = await seasons.topCleanSheets(
+      seasonId,
+      league.tournamentId,
+    );
+    final List<LeaderRow> rated = await seasons.topRated(
+      seasonId,
+      league.tournamentId,
+    );
+    expect(scorers, isNotEmpty);
+    expect(scorers.first.value, greaterThan(0));
+    expect(assists, isNotEmpty);
+    expect(cleanSheets, isNotEmpty);
+    expect(rated, isNotEmpty);
+    expect(rated.first.value, inInclusiveRange(2.0, 10.0));
+
+    final List<LeaderRow> clubScorers = await seasons.topScorers(
+      seasonId,
+      league.tournamentId,
+      teamId: userClub.teamId,
+    );
+    final List<LeaderRow> clubRated = await seasons.topRated(
+      seasonId,
+      league.tournamentId,
+      teamId: userClub.teamId,
+    );
+    expect(clubRated, isNotEmpty);
+    expect(
+      clubRated.every((LeaderRow r) => r.teamId == userClub.teamId),
+      isTrue,
+    );
+    expect(
+      clubScorers.every((LeaderRow r) => r.teamId == userClub.teamId),
+      isTrue,
+    );
 
     // ------------------------------------------------------ stored match data
     final int? playerRows = firstInt(
@@ -157,23 +228,30 @@ void main() {
     expect(incidents, greaterThan(0));
 
     // Every cup round produced a single final winner.
-    final List<Map<String, Object?>> finalRound = await db.rawQuery('''
+    final List<Map<String, Object?>> finalRound = await db.rawQuery(
+      '''
       SELECT COUNT(*) AS games FROM matches
       WHERE season_id = ? AND tournament_id = ?
         AND phase = (SELECT MAX(phase) FROM matches
                      WHERE season_id = ? AND tournament_id = ?)
-    ''', <Object?>[
-      seasonId,
-      cup.tournamentId,
-      seasonId,
-      cup.tournamentId,
-    ]);
+    ''',
+      <Object?>[seasonId, cup.tournamentId, seasonId, cup.tournamentId],
+    );
     expect(finalRound.first['games'], 1);
+    final int? drawnKnockouts = firstInt(
+      await db.rawQuery(
+        '''
+      SELECT COUNT(*) AS draws FROM matches
+      WHERE season_id = ? AND tournament_id = ? AND status = ?
+        AND winner_id IS NULL
+    ''',
+        <Object?>[seasonId, cup.tournamentId, t.matchFinished],
+      ),
+    );
+    expect(drawnKnockouts, 0, reason: 'cup ties are decided by shootout');
 
     // --------------------------------------------------------- season rollover
     final List<String> progress = <String>[];
-    // ignore: avoid_print
-    print('starting season rollover...');
     final Season next = await service.completeSeason(
       userTeamId: userClub.teamId,
       onProgress: progress.add,
@@ -182,10 +260,12 @@ void main() {
     expect(next.seasonId, isNot(seasonId));
     expect(next.startYear, 2026);
 
-    final int? newMatches = firstInt(await db.rawQuery(
-      'SELECT COUNT(*) FROM matches WHERE season_id = ?',
-      <Object?>[next.seasonId],
-    ));
+    final int? newMatches = firstInt(
+      await db.rawQuery(
+        'SELECT COUNT(*) FROM matches WHERE season_id = ?',
+        <Object?>[next.seasonId],
+      ),
+    );
     expect(newMatches, greaterThan(300));
 
     // Player career stats were archived before match rows were cleared.

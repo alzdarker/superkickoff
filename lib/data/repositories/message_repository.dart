@@ -42,18 +42,16 @@ class MessageRepository {
   }
 
   Future<void> markRead(int messageId) => db.update(
-        t.messages,
-        <String, Object?>{'is_read': 1},
-        where: 'message_id = ?',
-        whereArgs: <Object?>[messageId],
-      );
+    t.messages,
+    <String, Object?>{'is_read': 1},
+    where: 'message_id = ?',
+    whereArgs: <Object?>[messageId],
+  );
 
   Future<int> unreadCount() async {
-    final int? c = Sqflite.firstIntValue(await db.query(
-      t.messages,
-      columns: ['COUNT(*)'],
-      where: 'is_read = 0',
-    ));
+    final int? c = Sqflite.firstIntValue(
+      await db.query(t.messages, columns: ['COUNT(*)'], where: 'is_read = 0'),
+    );
     return c ?? 0;
   }
 
