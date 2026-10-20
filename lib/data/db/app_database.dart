@@ -55,6 +55,14 @@ class AppDatabase {
       )
     ''');
     await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${t.teamLineups} (
+        team_id INTEGER NOT NULL,
+        slot INTEGER NOT NULL,
+        player_id INTEGER NOT NULL,
+        PRIMARY KEY (team_id, slot)
+      )
+    ''');
+    await db.execute('''
       CREATE TABLE IF NOT EXISTS ${t.teamTraining} (
         team_id INTEGER PRIMARY KEY,
         season_id INTEGER NOT NULL,

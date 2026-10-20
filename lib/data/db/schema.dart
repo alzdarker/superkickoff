@@ -11,6 +11,7 @@ const String coaches = 'coaches';
 const String stadiums = 'stadiums';
 const String teamPlayers = 'team_players';
 const String teamTactics = 'team_tactics';
+const String teamLineups = 'team_lineups';
 const String teamTraining = 'team_training';
 const String teamLoans = 'team_loans';
 const String countryCoaches = 'country_coaches';

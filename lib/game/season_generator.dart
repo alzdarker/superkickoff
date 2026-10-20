@@ -23,6 +23,7 @@ class SeasonGenerator {
     required int countryId,
     required Tournament league,
     required Tournament? cup,
+    List<Tournament> internationals = const <Tournament>[],
     int startYear = 2025,
   }) async {
     _startDate = DateTime(startYear, 8, 9); // first Saturday of August-ish
@@ -40,6 +41,13 @@ class SeasonGenerator {
         'status': t.seasonTournamentActive,
       });
     }
+    for (final Tournament tour in internationals) {
+      await db.insert(t.seasonTournaments, <String, Object?>{
+        'season_id': season.seasonId,
+        'tournament_id': tour.tournamentId,
+        'status': t.seasonTournamentActive,
+      });
+    }
 
     // ------------------------------------------------ participants
     final List<Team> leagueTeams = await _teamsOf(countryId, league.divisionId);
@@ -47,6 +55,20 @@ class SeasonGenerator {
     final Map<int, Team> allTeams = <int, Team>{};
     for (final Team tm in <Team>[...leagueTeams, ...cupTeams]) {
       allTeams[tm.teamId] = tm;
+    }
+    // Continental entrants: each country sends its top clubs by power.
+    final Map<int, List<int>> internationalEntrants = <int, List<int>>{};
+    for (final Tournament tour in internationals) {
+      final List<Team> invited = await _internationalTeams(tour);
+      if (invited.length < 4) continue;
+      final Map<int, Team> byId = <int, Team>{
+        for (final Team tm in invited) tm.teamId: tm,
+      };
+      final List<int> entrants = seedByIdes(invited);
+      internationalEntrants[tour.tournamentId] = entrants;
+      for (final int id in entrants) {
+        allTeams[id] = byId[id]!;
+      }
     }
 
     // ------------------------------------------------ registration
@@ -99,6 +121,20 @@ class SeasonGenerator {
       );
     }
 
+    // ------------------------------------ continental first round
+    int internationalIndex = 0;
+    for (final MapEntry<int, List<int>> entry
+        in internationalEntrants.entries) {
+      await scheduleCupRound(
+        season.seasonId,
+        entry.key,
+        entry.value,
+        phase: 1,
+        date: _internationalDate(internationalIndex++),
+        allTeams: allTeams,
+      );
+    }
+
     await _insertMatches(matchRows);
     return CareerPlan(
       season: season,
@@ -108,7 +144,91 @@ class SeasonGenerator {
       cupRounds: cupPhases,
       teamCount: allTeams.length,
       matchCount: matchRows.length,
+      internationalTournamentIds: internationalEntrants.keys.toList(),
     );
+  }
+
+  /// Adds continental cups to a season that was generated before the feature
+  /// existed. Existing careers keep their domestic fixtures untouched.
+  Future<int> addInternationalCups({
+    required Season season,
+    required List<Tournament> internationals,
+    required Map<int, Team> teamCache,
+  }) async {
+    int added = 0;
+    for (final Tournament tour in internationals) {
+      final List<Map<String, Object?>> linked = await db.query(
+        t.seasonTournaments,
+        where: 'season_id = ? AND tournament_id = ?',
+        whereArgs: <Object?>[season.seasonId, tour.tournamentId],
+        limit: 1,
+      );
+      if (linked.isNotEmpty) continue;
+      final List<Team> invited = await _internationalTeams(tour);
+      if (invited.length < 4) continue;
+      final Map<int, Team> byId = <int, Team>{
+        for (final Team tm in invited) tm.teamId: tm,
+      };
+      final List<int> entrants = seedByIdes(invited);
+
+      final List<Map<String, Object?>> registered = await db.query(
+        t.seasonTeams,
+        columns: <String>['team_id'],
+        where: 'season_id = ?',
+        whereArgs: <Object?>[season.seasonId],
+      );
+      final Set<int> registeredIds = <int>{
+        for (final Map<String, Object?> row in registered)
+          row['team_id'] as int,
+      };
+      for (final int id in entrants) {
+        final Team team = byId[id]!;
+        teamCache[id] = team;
+        if (registeredIds.contains(id)) continue;
+        await db.insert(t.seasonTeams, <String, Object?>{
+          'team_id': id,
+          'season_id': season.seasonId,
+          'coach_id': team.coachId,
+        });
+      }
+      await db.insert(t.seasonTournaments, <String, Object?>{
+        'season_id': season.seasonId,
+        'tournament_id': tour.tournamentId,
+        'status': t.seasonTournamentActive,
+      });
+
+      final List<Map<String, Object?>> dateRows = await db.rawQuery(
+        '''
+        SELECT MIN(date) AS next_date FROM matches
+        WHERE season_id = ? AND status = ?
+      ''',
+        <Object?>[season.seasonId, t.matchScheduled],
+      );
+      final String? nextDate = dateRows.isEmpty
+          ? null
+          : dateRows.first['next_date'] as String?;
+      final DateTime base =
+          DateTime.tryParse(nextDate ?? '') ?? DateTime(season.startYear, 8, 9);
+      final DateTime date = _nextWednesday(base.add(const Duration(days: 7)));
+      await scheduleCupRound(
+        season.seasonId,
+        tour.tournamentId,
+        entrants,
+        phase: 1,
+        date: date,
+        allTeams: teamCache,
+      );
+      added++;
+    }
+    return added;
+  }
+
+  DateTime _nextWednesday(DateTime from) {
+    DateTime d = from;
+    while (d.weekday != DateTime.wednesday) {
+      d = d.add(const Duration(days: 1));
+    }
+    return d;
   }
 
   /// Schedules the NEXT knockout round once a cup phase fully finished.
@@ -170,6 +290,31 @@ class SeasonGenerator {
     return Season.fromMap(rows.first);
   }
 
+  /// Clubs invited to a continental competition, honouring each country's
+  /// slot count. Only top-division clubs qualify.
+  Future<List<Team>> _internationalTeams(Tournament tour) async {
+    final rows = await db.query(
+      t.internationalSlots,
+      where: 'tournament_id = ?',
+      whereArgs: <Object?>[tour.tournamentId],
+    );
+    final List<Team> teams = <Team>[];
+    for (final Map<String, Object?> row in rows) {
+      final int countryId = row['country_id'] as int;
+      final int slots = (row['slots'] as int?) ?? 0;
+      if (slots <= 0) continue;
+      final List<Map<String, Object?>> clubRows = await db.query(
+        t.teams,
+        where: 'country_id = ? AND division = 1',
+        whereArgs: <Object?>[countryId],
+        orderBy: 'power DESC',
+        limit: slots,
+      );
+      teams.addAll(clubRows.map(Team.fromMap));
+    }
+    return teams;
+  }
+
   Future<List<Team>> _teamsOf(int countryId, int? divisionId) async {
     final String where = divisionId == null
         ? 'country_id = ?'
@@ -226,6 +371,13 @@ class SeasonGenerator {
     return _startDate.add(Duration(days: 7 * weekOffset - 3));
   }
 
+  /// Continental rounds get their own mid-week slot so they never land on the
+  /// domestic cup's dates.
+  DateTime _internationalDate(int index) {
+    final int weekOffset = 3 + index * 4;
+    return _startDate.add(Duration(days: 7 * weekOffset - 2));
+  }
+
   /// Sorts teams by power (seeding) and returns their ids.
   /// Seeds the cup by club power and trims the field to the largest power of
   /// two that fits, which keeps every knockout round evenly paired.
@@ -266,6 +418,7 @@ class CareerPlan {
     required this.cupRounds,
     required this.teamCount,
     required this.matchCount,
+    this.internationalTournamentIds = const <int>[],
   });
 
   final Season season;
@@ -275,6 +428,7 @@ class CareerPlan {
   final int cupRounds;
   final int teamCount;
   final int matchCount;
+  final List<int> internationalTournamentIds;
 }
 
 /// One direction of a round-robin match: home/away pair + round + leg.

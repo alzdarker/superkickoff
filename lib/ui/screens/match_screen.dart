@@ -10,6 +10,7 @@ import '../../state/career_provider.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'match_stats_sheet.dart';
+import 'matchday_results_sheet.dart';
 
 /// Live match viewer: the result is pre-simulated by the engine and revealed
 /// minute by minute, exactly like Superkickoff's timeline games.
@@ -289,6 +290,14 @@ class _MatchScreenState extends State<MatchScreen> {
                         child: FilledButton(
                           onPressed: () async {
                             await game.finishLiveMatch();
+                            if (!mounted) return;
+                            await showMatchdayResults(
+                              context,
+                              matches: game.lastMatchday,
+                              teams: game.lastMatchdayTeams,
+                              userTeamId: game.userTeamId,
+                              date: session.match.date,
+                            );
                             if (mounted) Navigator.of(context).pop();
                           },
                           child: const Text('Continue'),

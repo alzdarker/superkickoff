@@ -568,6 +568,66 @@ class SeasonRepository {
     ];
   }
 
+  /// Trophies won by a club, derived from completed competitions.
+  ///
+  /// Nothing is duplicated into a history table: league titles come from the
+  /// final standings and knockout titles from the final match, both of which
+  /// stay in the database after a season is archived.
+  Future<List<ClubTrophy>> clubTrophies(int teamId) async {
+    final List<Map<String, Object?>> competitions = await db.rawQuery('''
+      SELECT st.season_id, st.tournament_id, s.name AS season_name,
+             s.end_year, tu.name AS tournament_name, tu.organization
+      FROM season_tournaments st
+      JOIN seasons s ON s.season_id = st.season_id
+      JOIN tournaments tu ON tu.tournament_id = st.tournament_id
+      ORDER BY st.season_id DESC, tu.tournament_id ASC
+    ''');
+    final List<ClubTrophy> trophies = <ClubTrophy>[];
+    for (final Map<String, Object?> row in competitions) {
+      final int seasonId = row['season_id'] as int;
+      final int tournamentId = row['tournament_id'] as int;
+      final int organization = (row['organization'] as int?) ?? 0;
+      if ((await remainingMatches(seasonId, tournamentId)) > 0) continue;
+
+      int? champion;
+      if (organization == t.orgLeague) {
+        final List<StandingRow> table = await standings(seasonId, tournamentId);
+        if (table.isNotEmpty) champion = table.first.teamId;
+      } else {
+        final List<Map<String, Object?>> rows = await db.rawQuery(
+          '''
+          SELECT winner_id FROM matches
+          WHERE season_id = ? AND tournament_id = ? AND status = ?
+            AND phase = (SELECT MAX(phase) FROM matches
+                         WHERE season_id = ? AND tournament_id = ?)
+            AND winner_id IS NOT NULL
+          LIMIT 1
+        ''',
+          <Object?>[
+            seasonId,
+            tournamentId,
+            t.matchFinished,
+            seasonId,
+            tournamentId,
+          ],
+        );
+        if (rows.isNotEmpty) champion = rows.first['winner_id'] as int?;
+      }
+      if (champion != teamId) continue;
+      trophies.add(
+        ClubTrophy(
+          tournamentId: tournamentId,
+          tournamentName: (row['tournament_name'] as String?) ?? 'Trophy',
+          organization: organization,
+          seasonId: seasonId,
+          seasonName: (row['season_name'] as String?) ?? 'Season',
+          year: (row['end_year'] as int?) ?? 0,
+        ),
+      );
+    }
+    return trophies;
+  }
+
   /// Awards won by players of [teamId], newest first.
   Future<List<PlayerAward>> clubAwards(int teamId, {int limit = 20}) async {
     final List<Map<String, Object?>> rows = await db.rawQuery(

@@ -27,17 +27,20 @@ class ClubHubSheet extends StatefulWidget {
 
 class _ClubHubSheetState extends State<ClubHubSheet> {
   late Future<ClubOverview?> _future;
+  late Future<List<ClubTrophy>> _trophies;
   bool _busy = false;
 
   @override
   void initState() {
     super.initState();
     _future = context.read<CareerProvider>().clubOverview();
+    _trophies = context.read<CareerProvider>().clubTrophies();
   }
 
   void _reload() {
     setState(() {
       _future = context.read<CareerProvider>().clubOverview();
+      _trophies = context.read<CareerProvider>().clubTrophies();
     });
   }
 
@@ -84,7 +87,7 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
 
   Widget _content(ClubOverview club) {
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Column(
         children: <Widget>[
           const SizedBox(height: 8),
@@ -159,6 +162,7 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
               Tab(text: 'Overview'),
               Tab(text: 'Finances'),
               Tab(text: 'Stadium'),
+              Tab(text: 'Honours'),
             ],
           ),
           Expanded(
@@ -167,6 +171,7 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
                 _overviewTab(club),
                 _financesTab(club),
                 _stadiumTab(club),
+                _honoursTab(),
               ],
             ),
           ),
@@ -229,6 +234,148 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _honoursTab() {
+    return FutureBuilder<List<ClubTrophy>>(
+      future: _trophies,
+      builder:
+          (BuildContext context, AsyncSnapshot<List<ClubTrophy>> snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final List<ClubTrophy> trophies =
+                snapshot.data ?? const <ClubTrophy>[];
+            if (trophies.isEmpty) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    'No trophies yet. Win a league, domestic cup or '
+                    'continental competition to fill this cabinet.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppTheme.textDim),
+                  ),
+                ),
+              );
+            }
+            final Map<String, List<ClubTrophy>> grouped =
+                <String, List<ClubTrophy>>{};
+            for (final ClubTrophy trophy in trophies) {
+              grouped
+                  .putIfAbsent(trophy.tournamentName, () => <ClubTrophy>[])
+                  .add(trophy);
+            }
+            final List<MapEntry<String, List<ClubTrophy>>> entries =
+                grouped.entries.toList()..sort(
+                  (
+                    MapEntry<String, List<ClubTrophy>> a,
+                    MapEntry<String, List<ClubTrophy>> b,
+                  ) => b.value.length.compareTo(a.value.length),
+                );
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+              children: <Widget>[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceCard,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: Row(
+                    children: <Widget>[
+                      const Icon(
+                        Icons.emoji_events,
+                        color: AppTheme.warn,
+                        size: 30,
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            '${trophies.length}',
+                            style: const TextStyle(
+                              fontSize: 26,
+                              height: 1,
+                              fontWeight: FontWeight.w900,
+                              color: AppTheme.warn,
+                            ),
+                          ),
+                          const Text(
+                            'TROPHIES',
+                            style: TextStyle(
+                              fontSize: 9,
+                              letterSpacing: 1,
+                              color: AppTheme.textDim,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                for (final MapEntry<String, List<ClubTrophy>> entry in entries)
+                  _trophyRow(entry.key, entry.value),
+              ],
+            );
+          },
+    );
+  }
+
+  Widget _trophyRow(String name, List<ClubTrophy> won) {
+    final List<int> years = won.map((ClubTrophy t) => t.year).toSet().toList()
+      ..sort((int a, int b) => b.compareTo(a));
+    final IconData icon = won.first.isInternational
+        ? Icons.public
+        : won.first.isLeague
+        ? Icons.emoji_events
+        : Icons.military_tech;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(icon, color: AppTheme.warn, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  years.join(', '),
+                  style: const TextStyle(fontSize: 11, color: AppTheme.textDim),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            'x${won.length}',
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: AppTheme.accent,
             ),
           ),
         ],

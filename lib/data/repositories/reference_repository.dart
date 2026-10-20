@@ -43,6 +43,21 @@ class ReferenceRepository {
         <Object?>[countryId, countryId, t.orgLeague],
       );
 
+  /// Continental club competitions this country's clubs qualify for.
+  Future<List<Tournament>> internationalCups(int countryId) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT tu.* FROM tournaments tu
+      JOIN international_slots isl ON isl.tournament_id = tu.tournament_id
+      WHERE isl.country_id = ? AND tu.organization = ?
+      GROUP BY tu.tournament_id
+      ORDER BY tu.tournament_id
+    ''',
+      <Object?>[countryId, t.orgInternational],
+    );
+    return rows.map(Tournament.fromMap).toList();
+  }
+
   /// The national cup (organization = 3) of a country, if any.
   Future<Map<String, Object?>?> nationalCup(int countryId) async {
     final rows = await db.rawQuery(

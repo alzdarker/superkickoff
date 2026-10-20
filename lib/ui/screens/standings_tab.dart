@@ -32,10 +32,17 @@ class StandingsTab extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (game.cup != null)
-                  Text(
-                    game.cup!.name,
-                    style: const TextStyle(fontSize: 11, color: AppTheme.warn),
+                if (game.cups.isNotEmpty)
+                  Flexible(
+                    child: Text(
+                      game.cups.map((Tournament t) => t.name).join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.warn,
+                      ),
+                    ),
                   ),
               ],
             ),

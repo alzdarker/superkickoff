@@ -41,6 +41,10 @@ class CareerProvider extends ChangeNotifier {
   Season? season;
   Tournament? league;
   Tournament? cup;
+
+  /// Every knockout competition of the season: domestic cup plus continental
+  /// cups such as the Champions League or AFC Champions League.
+  List<Tournament> cups = <Tournament>[];
   int userTeamId = 0;
   Team? userTeam;
   Map<int, Team> teamCache = <int, Team>{};
@@ -48,6 +52,11 @@ class CareerProvider extends ChangeNotifier {
   List<FixtureMatch> upcoming = <FixtureMatch>[];
   String? nextDate;
   List<FixtureMatch> matchesToday = <FixtureMatch>[];
+
+  /// The matchday that just finished, kept after the world advances so the
+  /// results screen can show every game played on that date.
+  List<FixtureMatch> lastMatchday = <FixtureMatch>[];
+  Map<int, Team> lastMatchdayTeams = <int, Team>{};
   List<StandingRow> standings = <StandingRow>[];
   List<LeaderRow> topScorers = <LeaderRow>[];
   List<LeaderRow> topAssists = <LeaderRow>[];
@@ -59,6 +68,9 @@ class CareerProvider extends ChangeNotifier {
   List<LeaderRow> clubTopAssists = <LeaderRow>[];
   List<LeaderRow> clubTopRated = <LeaderRow>[];
   Formation formation = Formation.f442;
+
+  /// Saved XI for the formation pitch: slot index -> player id.
+  Map<int, int> lineup = <int, int>{};
   List<Message> inbox = <Message>[];
   int unreadCount = 0;
   int week = 0;
@@ -116,10 +128,7 @@ class CareerProvider extends ChangeNotifier {
       return;
     }
     league = await _leagueFor(userTeam!);
-    final Map<String, Object?>? cupRow = await _refs.nationalCup(
-      userTeam!.countryId,
-    );
-    cup = cupRow == null ? null : Tournament.fromMap(cupRow);
+    await _loadCups(season!.seasonId);
     // Cache every team that participates this season.
     final rows = await _db.rawQuery(
       '''
@@ -133,6 +142,47 @@ class CareerProvider extends ChangeNotifier {
       for (final Map<String, Object?> row in rows)
         row['team_id'] as int: Team.fromMap(row),
     };
+    await _ensureInternationalCups();
+  }
+
+  /// Older saves were created without continental competitions. Add them once
+  /// when such a save is loaded so existing careers get the new tournaments.
+  Future<void> _ensureInternationalCups() async {
+    final Season? current = season;
+    final Team? team = userTeam;
+    if (current == null || team == null) return;
+    if (cups.any((Tournament tour) => tour.isInternational)) return;
+    final List<Tournament> internationals = await _refs.internationalCups(
+      team.countryId,
+    );
+    if (internationals.isEmpty) return;
+    final int added = await SeasonGenerator(_db, random: _rng)
+        .addInternationalCups(
+          season: current,
+          internationals: internationals,
+          teamCache: teamCache,
+        );
+    if (added > 0) await _loadCups(current.seasonId);
+  }
+
+  Future<void> _loadCups(int seasonId) async {
+    final rows = await _db.rawQuery(
+      '''
+      SELECT tu.* FROM season_tournaments st
+      JOIN tournaments tu ON tu.tournament_id = st.tournament_id
+      WHERE st.season_id = ? AND tu.organization IN (?, ?)
+      ORDER BY tu.tournament_id ASC
+    ''',
+      <Object?>[seasonId, t.orgNationalCup, t.orgInternational],
+    );
+    cups = rows.map(Tournament.fromMap).toList();
+    cup = null;
+    for (final Tournament tour in cups) {
+      if (tour.isNationalCup) {
+        cup = tour;
+        break;
+      }
+    }
   }
 
   /// The career row stores the managed club per season (career_history).
@@ -231,6 +281,7 @@ class CareerProvider extends ChangeNotifier {
           countryId: countryId,
           league: leagueTournament,
           cup: cupTournament,
+          internationals: await _refs.internationalCups(countryId),
         );
     onProgress('Saving career...');
     // Persist the manager pick for continuation across restarts.
@@ -244,6 +295,7 @@ class CareerProvider extends ChangeNotifier {
     userTeam = await _refs.teamById(teamId);
     league = leagueTournament;
     cup = cupTournament;
+    await _loadCups(plan.season.seasonId);
     final rows = await _db.rawQuery(
       '''
       SELECT tm.* FROM season_teams st
@@ -273,6 +325,7 @@ class CareerProvider extends ChangeNotifier {
         ? <FixtureMatch>[]
         : await _service.matchesOnDate(season!.seasonId, nextDate!);
     formation = Formation.parse(await _squads.formationForTeam(userTeamId));
+    lineup = await _squads.lineupForTeam(userTeamId);
     if (league != null) {
       final int seasonId = season!.seasonId;
       final int tournamentId = league!.tournamentId;
@@ -341,11 +394,14 @@ class CareerProvider extends ChangeNotifier {
   /// Only quick-simulates the rest of the current matchday (no user match).
   Future<void> playAiMatchday() async {
     if (season == null || nextDate == null) return;
+    final int seasonId = season!.seasonId;
+    final String date = nextDate!;
     await _service.simulateMatchday(
-      seasonId: season!.seasonId,
-      date: nextDate!,
+      seasonId: seasonId,
+      date: date,
       skipMatchId: nextUserMatch?.matchId,
     );
+    await _rememberMatchday(seasonId, date);
     await _tickAfterMatchday();
   }
 
@@ -353,24 +409,37 @@ class CareerProvider extends ChangeNotifier {
   /// the live session.
   Future<void> finishLiveMatch() async {
     final FixtureMatch? mine = nextUserMatch;
-    if (season != null && nextDate != null) {
+    final int? seasonId = season?.seasonId;
+    final String? date = nextDate;
+    if (seasonId != null && date != null) {
       await _service.simulateMatchday(
-        seasonId: season!.seasonId,
-        date: nextDate!,
+        seasonId: seasonId,
+        date: date,
         skipMatchId: mine?.matchId,
       );
+      await _rememberMatchday(seasonId, date);
     }
     liveSession = null;
     await _tickAfterMatchday();
   }
 
+  Future<void> _rememberMatchday(int seasonId, String date) async {
+    final List<FixtureMatch> played = await _service.matchesOnDate(
+      seasonId,
+      date,
+      scheduledOnly: false,
+    );
+    lastMatchday = played.where((FixtureMatch m) => m.isPlayed).toList();
+    lastMatchdayTeams = Map<int, Team>.of(teamCache);
+  }
+
   Future<void> _tickAfterMatchday() async {
     if (season == null) return;
-    // Cup rounds might be ready to be drawn.
-    if (cup != null) {
+    // Cup rounds might be ready to be drawn (domestic and continental).
+    for (final Tournament tournament in cups) {
       await _service.maybeScheduleNextCupRound(
         seasonId: season!.seasonId,
-        cupTournamentId: cup!.tournamentId,
+        cupTournamentId: tournament.tournamentId,
         teamCache: teamCache,
       );
     }
@@ -406,6 +475,14 @@ class CareerProvider extends ChangeNotifier {
   // ---------------------------------------------------------------- squad
 
   Future<List<Player>> squadForUser() => _squads.squadForTeam(userTeamId);
+
+  Future<List<SquadStatRow>> squadStatistics() {
+    final int? seasonId = season?.seasonId;
+    if (seasonId == null) {
+      return Future<List<SquadStatRow>>.value(<SquadStatRow>[]);
+    }
+    return _squads.squadSeasonStats(userTeamId, seasonId);
+  }
 
   Future<Map<int, int>> suspensionsForUser() =>
       _squads.suspensionsForTeam(userTeamId);
@@ -445,6 +522,8 @@ class CareerProvider extends ChangeNotifier {
 
   Future<ClubOverview?> clubOverview() => _squads.clubOverview(userTeamId);
 
+  Future<List<ClubTrophy>> clubTrophies() => _seasons.clubTrophies(userTeamId);
+
   Future<ClubHistory> clubHistory() async {
     final List<CareerSeason> seasons = await _seasons.careerHistory(userTeamId);
     final List<PlayerAward> awards = await _seasons.clubAwards(userTeamId);
@@ -461,10 +540,48 @@ class CareerProvider extends ChangeNotifier {
   Future<List<TransferRecord>> transferHistory() =>
       _squads.transferHistory(userTeamId);
 
-  /// Saves the tactic used for the next match.
+  /// Saves the tactic used for the next match. A new shape resets the XI
+  /// because slot groups change.
   Future<void> setFormation(Formation f) async {
     formation = f;
     await _squads.setFormation(userTeamId, f.name);
+    if (lineup.isNotEmpty) {
+      lineup = <int, int>{};
+      await _squads.clearLineup(userTeamId);
+    }
+    notifyListeners();
+  }
+
+  /// Places [playerId] in [slot]. A player already in another slot swaps with
+  /// the occupant, so the XI always stays consistent.
+  Future<void> assignLineupSlot(int slot, int playerId) async {
+    int? oldSlot;
+    for (final MapEntry<int, int> entry in lineup.entries) {
+      if (entry.value == playerId) {
+        oldSlot = entry.key;
+        break;
+      }
+    }
+    final int? displaced = lineup[slot];
+    lineup.removeWhere((int key, int value) => value == playerId);
+    lineup[slot] = playerId;
+    if (displaced != null && oldSlot != null && oldSlot != slot) {
+      lineup[oldSlot] = displaced;
+    }
+    await _squads.saveLineup(userTeamId, lineup);
+    notifyListeners();
+  }
+
+  Future<void> clearLineupSlot(int slot) async {
+    if (lineup.remove(slot) == null) return;
+    await _squads.saveLineup(userTeamId, lineup);
+    notifyListeners();
+  }
+
+  Future<void> clearLineup() async {
+    if (lineup.isEmpty) return;
+    lineup = <int, int>{};
+    await _squads.clearLineup(userTeamId);
     notifyListeners();
   }
 

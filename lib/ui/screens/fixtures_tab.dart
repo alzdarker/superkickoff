@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -15,7 +17,7 @@ class FixturesTab extends StatefulWidget {
 
 class _FixturesTabState extends State<FixturesTab> {
   List<FixtureMatch>? fixtures;
-  int? cupTournamentId;
+  Map<int, String> tournamentNames = <int, String>{};
 
   @override
   void didChangeDependencies() {
@@ -30,7 +32,9 @@ class _FixturesTabState extends State<FixturesTab> {
     if (!mounted) return;
     setState(() {
       fixtures = list;
-      cupTournamentId = game.cup?.tournamentId;
+      tournamentNames = <int, String>{
+        for (final Tournament tour in game.cups) tour.tournamentId: tour.name,
+      };
     });
   }
 
@@ -41,17 +45,22 @@ class _FixturesTabState extends State<FixturesTab> {
     if (list.isEmpty) {
       return const Center(child: Text('No fixtures yet'));
     }
+    final int leagueId = game.league?.tournamentId ?? 0;
+    final Map<int, int> maxPhases = <int, int>{};
+    for (final FixtureMatch m in list) {
+      if (m.tournamentId == leagueId) continue;
+      maxPhases[m.tournamentId] = max(maxPhases[m.tournamentId] ?? 1, m.phase);
+    }
+
     // Group by tournament + round.
     final Map<String, List<FixtureMatch>> groups =
         <String, List<FixtureMatch>>{};
-    final int maxCupPhase = list
-        .where((FixtureMatch m) => m.tournamentId == cupTournamentId)
-        .fold(1, (int best, FixtureMatch m) => m.phase > best ? m.phase : best);
     for (final FixtureMatch m in list) {
-      final bool isCup = m.tournamentId == cupTournamentId;
-      final String key = isCup
-          ? 'Cup · ${_phaseName(m.phase, maxCupPhase)}'
-          : 'League · Round ${m.round}';
+      final bool isLeague = m.tournamentId == leagueId;
+      final String key = isLeague
+          ? '${game.league?.name ?? 'League'} · Round ${m.round}'
+          : '${tournamentNames[m.tournamentId] ?? 'Cup'} · '
+                '${_phaseName(m.phase, maxPhases[m.tournamentId] ?? 1)}';
       groups.putIfAbsent(key, () => <FixtureMatch>[]).add(m);
     }
     final List<String> keys = groups.keys.toList();
@@ -78,7 +87,7 @@ class _FixturesTabState extends State<FixturesTab> {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: key.startsWith('League')
+                    color: key.startsWith(game.league?.name ?? 'League')
                         ? AppTheme.accent
                         : AppTheme.warn,
                   ),

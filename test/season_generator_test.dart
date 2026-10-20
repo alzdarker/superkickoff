@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:superkickoff/data/db/schema.dart' as t;
 import 'package:superkickoff/data/models/models.dart';
+import 'package:superkickoff/data/repositories/reference_repository.dart';
 import 'package:superkickoff/game/season_generator.dart';
 
 /// Integration test: generate a real 2025 season from the bundled database
@@ -137,6 +139,121 @@ void main() {
     // 64 of the 74 clubs enter a six-round knockout bracket.
     expect(cupMatches.length, 32);
     expect(plan.cupRounds, 6);
+  });
+
+  test('schedules domestic and continental cup rounds', () async {
+    const int countryId = 94; // Indonesia: AFC Champions League Elite + Two.
+    final Tournament league = Tournament.fromMap(
+      await findTournament(
+        countryId: countryId,
+        organization: t.orgLeague,
+        divisionId: 1,
+      ),
+    );
+    final Tournament cup = Tournament.fromMap(
+      await findTournament(
+        countryId: countryId,
+        organization: t.orgNationalCup,
+      ),
+    );
+    final List<Tournament> internationals = await ReferenceRepository(db)
+        .internationalCups(countryId);
+    expect(
+      internationals.map((Tournament tour) => tour.name),
+      containsAll(<String>[
+        'AFC Champions League Elite',
+        'AFC Champions League Two',
+      ]),
+    );
+
+    final CareerPlan plan = await SeasonGenerator(db, random: Random(3))
+        .generateCareer(
+          countryId: countryId,
+          league: league,
+          cup: cup,
+          internationals: internationals,
+        );
+    expect(plan.internationalTournamentIds.length, internationals.length);
+
+    for (final int tournamentId in plan.internationalTournamentIds) {
+      final List<Map<String, Object?>> rows = await db.query(
+        t.matches,
+        where: 'season_id = ? AND tournament_id = ?',
+        whereArgs: <Object?>[plan.season.seasonId, tournamentId],
+      );
+      expect(rows, isNotEmpty, reason: 'continental cup has fixtures');
+      // Every entrant is paired, so the first round has an even tie count.
+      expect(rows.length.isEven, isTrue);
+    }
+
+    final List<Map<String, Object?>> foreignRows = await db.rawQuery(
+      '''
+      SELECT COUNT(*) AS total FROM season_teams st
+      JOIN teams tm ON tm.team_id = st.team_id
+      WHERE st.season_id = ? AND tm.country_id != ?
+    ''',
+      <Object?>[plan.season.seasonId, countryId],
+    );
+    expect(foreignRows.first['total'] as int, greaterThan(0));
+  });
+
+  test('adds continental cups to an existing season', () async {
+    const int countryId = 185; // England: Champions League, Europa, Conference.
+    final Tournament league = Tournament.fromMap(
+      await findTournament(
+        countryId: countryId,
+        organization: t.orgLeague,
+        divisionId: 1,
+      ),
+    );
+    final Tournament cup = Tournament.fromMap(
+      await findTournament(
+        countryId: countryId,
+        organization: t.orgNationalCup,
+      ),
+    );
+    final SeasonGenerator generator = SeasonGenerator(db, random: Random(5));
+    final CareerPlan plan = await generator.generateCareer(
+      countryId: countryId,
+      league: league,
+      cup: cup,
+    );
+    expect(plan.internationalTournamentIds, isEmpty);
+
+    final List<Tournament> internationals = await ReferenceRepository(db)
+        .internationalCups(countryId);
+    final List<Map<String, Object?>> registered = await db.rawQuery(
+      '''
+      SELECT tm.* FROM season_teams st
+      JOIN teams tm ON tm.team_id = st.team_id
+      WHERE st.season_id = ?
+    ''',
+      <Object?>[plan.season.seasonId],
+    );
+    final Map<int, Team> cache = <int, Team>{
+      for (final Map<String, Object?> row in registered)
+        row['team_id'] as int: Team.fromMap(row),
+    };
+    final int added = await generator.addInternationalCups(
+      season: plan.season,
+      internationals: internationals,
+      teamCache: cache,
+    );
+    expect(added, internationals.length);
+    for (final Tournament tour in internationals) {
+      final List<Map<String, Object?>> linked = await db.query(
+        t.seasonTournaments,
+        where: 'season_id = ? AND tournament_id = ?',
+        whereArgs: <Object?>[plan.season.seasonId, tour.tournamentId],
+      );
+      expect(linked, isNotEmpty);
+      final List<Map<String, Object?>> fixtures = await db.query(
+        t.matches,
+        where: 'season_id = ? AND tournament_id = ?',
+        whereArgs: <Object?>[plan.season.seasonId, tour.tournamentId],
+      );
+      expect(fixtures, isNotEmpty);
+    }
   });
 
   test('double round robin pairs every team once per round', () {

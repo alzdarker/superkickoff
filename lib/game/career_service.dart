@@ -81,12 +81,21 @@ class CareerService {
     return rows.isEmpty ? null : rows.first['date'] as String?;
   }
 
-  /// All scheduled matches on [date].
-  Future<List<FixtureMatch>> matchesOnDate(int seasonId, String date) => db
+  /// Matches on [date]. Scheduled games only unless [scheduledOnly] is false,
+  /// which is used to show a finished matchday.
+  Future<List<FixtureMatch>> matchesOnDate(
+    int seasonId,
+    String date, {
+    bool scheduledOnly = true,
+  }) => db
       .query(
         t.matches,
-        where: 'season_id = ? AND status = ? AND date = ?',
-        whereArgs: <Object?>[seasonId, t.matchScheduled, date],
+        where: scheduledOnly
+            ? 'season_id = ? AND status = ? AND date = ?'
+            : 'season_id = ? AND date = ?',
+        whereArgs: scheduledOnly
+            ? <Object?>[seasonId, t.matchScheduled, date]
+            : <Object?>[seasonId, date],
       )
       .then((rows) => rows.map(FixtureMatch.fromMap).toList());
 
@@ -136,8 +145,19 @@ class CareerService {
       awayFormation: awayFormation,
       homeTeamId: home.teamId,
       awayTeamId: away.teamId,
+      homeLineupIds: await _lineupIds(home.teamId),
+      awayLineupIds: await _lineupIds(away.teamId),
       refereeTemper: await _refereeTemper(match),
     );
+  }
+
+  Future<List<int>> _lineupIds(int teamId) async {
+    final Map<int, int> slots = await _squads.lineupForTeam(teamId);
+    final List<MapEntry<int, int>> entries = slots.entries.toList()
+      ..sort(
+        (MapEntry<int, int> a, MapEntry<int, int> b) => a.key.compareTo(b.key),
+      );
+    return entries.map((MapEntry<int, int> e) => e.value).toList();
   }
 
   Future<int> _refereeTemper(FixtureMatch match) async {
@@ -229,7 +249,8 @@ class CareerService {
       limit: 1,
     );
     if (rows.isEmpty) return false;
-    final bool isCup = (rows.first['organization'] as int?) == t.orgNationalCup;
+    final int org = (rows.first['organization'] as int?) ?? 0;
+    final bool isCup = org == t.orgNationalCup || org == t.orgInternational;
     if (isCup) _cupTournaments.add(tournamentId);
     return isCup;
   }
@@ -532,17 +553,12 @@ class CareerService {
               '${champion?.name ?? table.first.name} are champions of ${tour.name}.',
           sender: 'League',
         );
-      } else if (tour.isNationalCup) {
-        final rows = await db.rawQuery(
-          '''
-          SELECT winner_id, COUNT(*) AS wins FROM matches
-          WHERE season_id = ? AND tournament_id = ? AND winner_id IS NOT NULL
-          GROUP BY winner_id ORDER BY wins DESC LIMIT 1
-        ''',
-          <Object?>[current.seasonId, tour.tournamentId],
+      } else {
+        final int? cupWinnerId = await _knockoutWinner(
+          current.seasonId,
+          tour.tournamentId,
         );
-        if (rows.isEmpty) continue;
-        final int cupWinnerId = rows.first['winner_id'] as int;
+        if (cupWinnerId == null) continue;
         await _matchRepo.adjustBudget(cupWinnerId, tour.prizeTeams);
         final Team? winner = await _refs.teamById(cupWinnerId);
         if (cupWinnerId == userTeamId) titles.add(tour.name);
@@ -619,6 +635,7 @@ class CareerService {
       countryId: userTeam.countryId,
       league: nextLeague,
       cup: nextCup,
+      internationals: await _refs.internationalCups(userTeam.countryId),
       startYear: current.startYear + 1,
     );
     await _messages.insert(
@@ -627,6 +644,28 @@ class CareerService {
       sender: 'League',
     );
     return plan.season;
+  }
+
+  /// Winner of the last knockout round (the final) of a cup competition.
+  Future<int?> _knockoutWinner(int seasonId, int tournamentId) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT winner_id FROM matches
+      WHERE season_id = ? AND tournament_id = ? AND status = ?
+        AND phase = (SELECT MAX(phase) FROM matches
+                     WHERE season_id = ? AND tournament_id = ?)
+        AND winner_id IS NOT NULL
+      LIMIT 1
+    ''',
+      <Object?>[
+        seasonId,
+        tournamentId,
+        t.matchFinished,
+        seasonId,
+        tournamentId,
+      ],
+    );
+    return rows.isEmpty ? null : rows.first['winner_id'] as int?;
   }
 
   Future<List<Tournament>> _seasonTournaments(int seasonId) async {

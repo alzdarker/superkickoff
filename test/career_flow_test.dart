@@ -121,6 +121,18 @@ void main() {
     );
     await service.simulateMatch(liveFixture, recordEvents: true);
 
+    // The finished matchday can be read back for the results screen.
+    final List<FixtureMatch> dateResults = await service.matchesOnDate(
+      seasonId,
+      firstDate,
+      scheduledOnly: false,
+    );
+    expect(dateResults.length, firstFixtures.length);
+    expect(
+      dateResults.any((FixtureMatch m) => m.matchId == liveFixture.matchId),
+      isTrue,
+    );
+
     final List<Map<String, Object?>> playedRows = await db.rawQuery(
       'SELECT player_id FROM match_players '
       'WHERE match_id = ? AND minutes > 0 LIMIT 1',
@@ -133,6 +145,14 @@ void main() {
     expect(profile, isNotNull);
     expect(profile!.stats.matches, greaterThan(0));
     expect(profile.stats.minutes, greaterThan(0));
+
+    final List<SquadStatRow> teamStats = await squads.squadSeasonStats(
+      userClub.teamId,
+      seasonId,
+    );
+    expect(teamStats.length, greaterThan(0));
+    expect(teamStats.any((SquadStatRow row) => row.appearances > 0), isTrue);
+    expect(teamStats.any((SquadStatRow row) => row.rating > 0), isTrue);
 
     int matchdays = 0;
     while (!await service.seasonComplete(seasonId)) {
@@ -259,6 +279,19 @@ void main() {
     expect(progress, isNotEmpty);
     expect(next.seasonId, isNot(seasonId));
     expect(next.startYear, 2026);
+
+    // The league champion's honours list shows the title just won.
+    final List<ClubTrophy> trophies = await seasons.clubTrophies(
+      table.first.teamId,
+    );
+    expect(
+      trophies.any(
+        (ClubTrophy trophy) =>
+            trophy.tournamentId == league.tournamentId &&
+            trophy.seasonId == seasonId,
+      ),
+      isTrue,
+    );
 
     final int? newMatches = firstInt(
       await db.rawQuery(

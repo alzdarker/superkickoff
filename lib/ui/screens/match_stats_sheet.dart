@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../data/models/models.dart';
 import '../../game/match_engine.dart';
@@ -6,36 +7,38 @@ import '../../state/career_provider.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
-/// Full-time match report: team stats plus the best-rated players.
+/// Full-time match report: team statistics charts plus every player rating.
 class MatchStatsSheet extends StatelessWidget {
   const MatchStatsSheet({super.key, required this.session});
 
   final LiveMatchSession session;
 
+  static const Color _awayColor = Color(0xFF60A5FA);
+
   @override
   Widget build(BuildContext context) {
     final MatchResult result = session.result;
-    final List<MatchPlayerRow> best =
-        result.playerRows
-            .where((MatchPlayerRow row) => row.minutes > 0)
-            .toList()
-          ..sort(
-            (MatchPlayerRow a, MatchPlayerRow b) =>
-                b.rating.compareTo(a.rating),
-          );
+    final int userTeamId = context.watch<CareerProvider>().userTeamId;
+    final List<MatchPlayerRow> played = result.playerRows
+        .where((MatchPlayerRow row) => row.minutes > 0)
+        .toList();
 
-    final int homeYellows = result.playerRows
+    final int homeYellows = played
         .where((MatchPlayerRow row) => row.teamId == session.homeTeam.teamId)
         .fold(0, (int sum, MatchPlayerRow row) => sum + row.yellowCards);
-    final int awayYellows = result.playerRows
+    final int awayYellows = played
         .where((MatchPlayerRow row) => row.teamId == session.awayTeam.teamId)
         .fold(0, (int sum, MatchPlayerRow row) => sum + row.yellowCards);
-    final int homeReds = result.playerRows
+    final int homeReds = played
         .where((MatchPlayerRow row) => row.teamId == session.homeTeam.teamId)
         .fold(0, (int sum, MatchPlayerRow row) => sum + row.redCards);
-    final int awayReds = result.playerRows
+    final int awayReds = played
         .where((MatchPlayerRow row) => row.teamId == session.awayTeam.teamId)
         .fold(0, (int sum, MatchPlayerRow row) => sum + row.redCards);
+    final bool userIsHome = session.homeTeam.teamId == userTeamId;
+    final List<Team> teamOrder = userIsHome
+        ? <Team>[session.homeTeam, session.awayTeam]
+        : <Team>[session.awayTeam, session.homeTeam];
 
     return Container(
       decoration: const BoxDecoration(
@@ -59,9 +62,13 @@ class MatchStatsSheet extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             const Text(
-              'Full-time statistics',
+              'FULL-TIME STATISTICS',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: AppTheme.textDim),
+              style: TextStyle(
+                fontSize: 10,
+                letterSpacing: 1,
+                color: AppTheme.textDim,
+              ),
             ),
             const SizedBox(height: 6),
             Row(
@@ -94,65 +101,77 @@ class MatchStatsSheet extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 18),
-            _possession(result),
-            const SizedBox(height: 10),
-            _statRow('Shots', result.homeShots, result.awayShots),
-            _statRow(
+            _teamLegend(),
+            const SizedBox(height: 8),
+            _statBar(
+              'Possession',
+              result.homePossession,
+              100 - result.homePossession,
+              suffix: '%',
+            ),
+            _statBar('Shots', result.homeShots, result.awayShots),
+            _statBar(
               'Shots on target',
               result.homeShotsOnTarget,
               result.awayShotsOnTarget,
             ),
-            _statRow('Saves', result.homeSaves, result.awaySaves),
-            _statRow('Yellow cards', homeYellows, awayYellows),
-            _statRow('Red cards', homeReds, awayReds),
-            const Divider(height: 26),
-            const Text(
-              'TOP PERFORMERS',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.textDim,
-                letterSpacing: 1,
-              ),
+            _statBar(
+              'Shot accuracy',
+              _percent(result.homeShotsOnTarget, result.homeShots),
+              _percent(result.awayShotsOnTarget, result.awayShots),
+              suffix: '%',
             ),
-            const SizedBox(height: 6),
-            for (final MatchPlayerRow row in best.take(8)) _playerRow(row),
+            _statBar('Saves', result.homeSaves, result.awaySaves),
+            _statBar('Yellow cards', homeYellows, awayYellows),
+            _statBar('Red cards', homeReds, awayReds),
+            const SizedBox(height: 18),
+            for (final Team team in teamOrder) ...<Widget>[
+              _ratingsHeader(team, team.teamId == userTeamId),
+              ..._ratings(played, team),
+              const SizedBox(height: 12),
+            ],
           ],
         ),
       ),
     );
   }
 
-  Widget _possession(MatchResult result) {
-    final int home = result.homePossession;
-    final int away = 100 - home;
-    return Column(
+  static int _percent(int value, int total) =>
+      total <= 0 ? 0 : ((value * 100) / total).round();
+
+  Widget _teamLegend() {
+    return Row(
       children: <Widget>[
-        Row(
-          children: <Widget>[
-            Text('$home%', style: const TextStyle(fontWeight: FontWeight.bold)),
-            const Spacer(),
-            const Text(
-              'Possession',
-              style: TextStyle(fontSize: 11, color: AppTheme.textDim),
-            ),
-            const Spacer(),
-            Text('$away%', style: const TextStyle(fontWeight: FontWeight.bold)),
-          ],
-        ),
-        const SizedBox(height: 5),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
+        Expanded(
           child: Row(
             children: <Widget>[
-              Expanded(
-                flex: home,
-                child: Container(height: 7, color: AppTheme.accent),
+              Container(width: 8, height: 8, color: AppTheme.accent),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  session.homeTeam.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10, color: AppTheme.textDim),
+                ),
               ),
-              Expanded(
-                flex: away,
-                child: Container(height: 7, color: Colors.grey.shade700),
+            ],
+          ),
+        ),
+        Expanded(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: <Widget>[
+              Flexible(
+                child: Text(
+                  session.awayTeam.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10, color: AppTheme.textDim),
+                ),
               ),
+              const SizedBox(width: 5),
+              Container(width: 8, height: 8, color: _awayColor),
             ],
           ),
         ),
@@ -160,31 +179,61 @@ class MatchStatsSheet extends StatelessWidget {
     );
   }
 
-  Widget _statRow(String label, int home, int away) {
+  Widget _statBar(String label, int home, int away, {String suffix = ''}) {
+    final int total = home + away;
+    final int homeFlex = total <= 0
+        ? 50
+        : ((home * 100) / total).round().clamp(1, 99);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
         children: <Widget>[
-          SizedBox(
-            width: 38,
-            child: Text(
-              '$home',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-            ),
+          Row(
+            children: <Widget>[
+              SizedBox(
+                width: 42,
+                child: Text(
+                  '$home$suffix',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 11, color: AppTheme.textDim),
+                ),
+              ),
+              SizedBox(
+                width: 42,
+                child: Text(
+                  '$away$suffix',
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
           ),
-          Expanded(
-            child: Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 11, color: AppTheme.textDim),
-            ),
-          ),
-          SizedBox(
-            width: 38,
-            child: Text(
-              '$away',
-              textAlign: TextAlign.right,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  flex: homeFlex,
+                  child: Container(height: 6, color: AppTheme.accent),
+                ),
+                Expanded(
+                  flex: 100 - homeFlex,
+                  child: Container(height: 6, color: _awayColor),
+                ),
+              ],
             ),
           ),
         ],
@@ -192,15 +241,83 @@ class MatchStatsSheet extends StatelessWidget {
     );
   }
 
+  Widget _ratingsHeader(Team team, bool mine) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: <Widget>[
+          CrestAvatar(team: team, radius: 12),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              mine ? '${team.name} · YOUR TEAM' : team.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: mine ? AppTheme.accent : Colors.white,
+              ),
+            ),
+          ),
+          const Text(
+            'RATING',
+            style: TextStyle(
+              fontSize: 9,
+              letterSpacing: 1,
+              color: AppTheme.textDim,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _ratings(List<MatchPlayerRow> played, Team team) {
+    final List<MatchPlayerRow> rows =
+        played.where((MatchPlayerRow row) => row.teamId == team.teamId).toList()
+          ..sort(
+            (MatchPlayerRow a, MatchPlayerRow b) =>
+                b.rating.compareTo(a.rating),
+          );
+    if (rows.isEmpty) {
+      return <Widget>[
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 8),
+          child: Text(
+            'No players recorded.',
+            style: TextStyle(fontSize: 11, color: AppTheme.textDim),
+          ),
+        ),
+      ];
+    }
+    return <Widget>[for (final MatchPlayerRow row in rows) _playerRow(row)];
+  }
+
   Widget _playerRow(MatchPlayerRow row) {
-    final bool isHome = row.teamId == session.homeTeam.teamId;
-    final Team team = isHome ? session.homeTeam : session.awayTeam;
+    final double score = row.rating / 10;
+    final Color ratingColor = score >= 7
+        ? AppTheme.accent
+        : score >= 6
+        ? Colors.white
+        : AppTheme.danger;
+    final List<String> details = <String>[
+      '${row.minutes}\'',
+      if (row.goals > 0) '${row.goals}G',
+      if (row.assists > 0) '${row.assists}A',
+      if (row.yellowCards > 0) '${row.yellowCards}Y',
+      if (row.redCards > 0) '${row.redCards}R',
+    ];
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         children: <Widget>[
-          CrestAvatar(team: team, radius: 11),
-          const SizedBox(width: 8),
+          SizedBox(
+            width: 20,
+            child: row.mvp == 1
+                ? const Icon(Icons.star, size: 13, color: AppTheme.warn)
+                : null,
+          ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -214,25 +331,49 @@ class MatchStatsSheet extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                Text(
-                  '${row.minutes}\' · ${row.goals}G ${row.assists}A',
-                  style: const TextStyle(fontSize: 10, color: AppTheme.textDim),
+                const SizedBox(height: 3),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: (row.rating / 100).clamp(0, 1),
+                          minHeight: 3,
+                          backgroundColor: Colors.grey.shade800,
+                          color: ratingColor,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      details.join(' · '),
+                      style: const TextStyle(
+                        fontSize: 9,
+                        color: AppTheme.textDim,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
+          const SizedBox(width: 10),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            width: 38,
+            padding: const EdgeInsets.symmetric(vertical: 4),
             decoration: BoxDecoration(
-              color: AppTheme.accentDim.withAlpha(120),
+              color: ratingColor.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: ratingColor.withValues(alpha: 0.5)),
             ),
             child: Text(
-              (row.rating / 10).toStringAsFixed(1),
-              style: const TextStyle(
+              score.toStringAsFixed(1),
+              textAlign: TextAlign.center,
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: AppTheme.accent,
+                color: ratingColor,
               ),
             ),
           ),

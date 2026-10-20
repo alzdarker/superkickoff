@@ -56,6 +56,14 @@ class SquadRepository {
         formation TEXT NOT NULL DEFAULT '4-4-2'
       )
     ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${t.teamLineups} (
+        team_id INTEGER NOT NULL,
+        slot INTEGER NOT NULL,
+        player_id INTEGER NOT NULL,
+        PRIMARY KEY (team_id, slot)
+      )
+    ''');
     _tacticsReady = true;
   }
 
@@ -81,6 +89,47 @@ class SquadRepository {
       'formation': formation,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
+
+  /// Saved XI: formation slot index -> player id.
+  Future<Map<int, int>> lineupForTeam(int teamId) async {
+    await _ensureTacticsTable();
+    final List<Map<String, Object?>> rows = await db.query(
+      t.teamLineups,
+      columns: <String>['slot', 'player_id'],
+      where: 'team_id = ?',
+      whereArgs: <Object?>[teamId],
+      orderBy: 'slot ASC',
+    );
+    return <int, int>{
+      for (final Map<String, Object?> row in rows)
+        row['slot'] as int: row['player_id'] as int,
+    };
+  }
+
+  /// Replaces the saved XI.
+  Future<void> saveLineup(int teamId, Map<int, int> slots) async {
+    await _ensureTacticsTable();
+    await db.transaction((Transaction txn) async {
+      await txn.delete(
+        t.teamLineups,
+        where: 'team_id = ?',
+        whereArgs: <Object?>[teamId],
+      );
+      for (final MapEntry<int, int> entry in slots.entries) {
+        await txn.insert(t.teamLineups, <String, Object?>{
+          'team_id': teamId,
+          'slot': entry.key,
+          'player_id': entry.value,
+        });
+      }
+    });
+  }
+
+  Future<void> clearLineup(int teamId) => db.delete(
+    t.teamLineups,
+    where: 'team_id = ?',
+    whereArgs: <Object?>[teamId],
+  );
 
   Future<void> setSquadStatus(int playerId, int squadStatus) => db.update(
     t.players,
@@ -297,6 +346,80 @@ class SquadRepository {
       ((teamRow?['budget'] as int?) ?? 0);
 
   // ------------------------------------------------------- profiles & club
+
+  /// Per-player statistics for every squad member in [seasonId]. Players with
+  /// no appearance stay in the list with zeroes.
+  Future<List<SquadStatRow>> squadSeasonStats(int teamId, int seasonId) async {
+    final List<Map<String, Object?>> rows = await db.rawQuery(
+      '''
+      SELECT p.player_id, p.name, p.position_id, p.profile, p.age, p.power,
+             COUNT(CASE WHEN m.season_id = ? AND m.status = ?
+                        THEN mp.match_id END) AS apps,
+             COALESCE(SUM(CASE WHEN m.season_id = ? AND m.status = ?
+                               THEN mp.minutes END), 0) AS minutes,
+             COALESCE(SUM(CASE WHEN m.season_id = ? AND m.status = ?
+                               THEN mp.goals END), 0) AS goals,
+             COALESCE(SUM(CASE WHEN m.season_id = ? AND m.status = ?
+                               THEN mp.assists END), 0) AS assists,
+             COALESCE(SUM(CASE WHEN m.season_id = ? AND m.status = ?
+                               THEN mp.mvp END), 0) AS mvps,
+             COALESCE(SUM(CASE WHEN m.season_id = ? AND m.status = ?
+                               THEN mp.yellow_cards END), 0) AS yellows,
+             COALESCE(SUM(CASE WHEN m.season_id = ? AND m.status = ?
+                               THEN mp.red_cards END), 0) AS reds,
+             COALESCE(AVG(CASE WHEN m.season_id = ? AND m.status = ?
+                               THEN mp.rating END), 0) / 10.0 AS rating
+      FROM team_players tp
+      JOIN players p ON p.player_id = tp.player_id
+      LEFT JOIN match_players mp
+        ON mp.player_id = p.player_id AND mp.team_id = tp.team_id
+       AND mp.minutes > 0
+      LEFT JOIN matches m ON m.match_id = mp.match_id
+      WHERE tp.team_id = ? AND p.status_id = ?
+      GROUP BY p.player_id
+      ORDER BY rating DESC, goals DESC, apps DESC, p.name ASC
+    ''',
+      <Object?>[
+        seasonId,
+        t.matchFinished,
+        seasonId,
+        t.matchFinished,
+        seasonId,
+        t.matchFinished,
+        seasonId,
+        t.matchFinished,
+        seasonId,
+        t.matchFinished,
+        seasonId,
+        t.matchFinished,
+        seasonId,
+        t.matchFinished,
+        seasonId,
+        t.matchFinished,
+        teamId,
+        t.statusActive,
+      ],
+    );
+    return <SquadStatRow>[
+      for (final Map<String, Object?> row in rows)
+        SquadStatRow(
+          playerId: row['player_id'] as int,
+          name: row['name'] as String,
+          positionId: (row['position_id'] as int?) ?? 1,
+          profile: (row['profile'] as String?) ?? 'D',
+          age: (row['age'] as int?) ?? 0,
+          power: (row['power'] as int?) ?? 0,
+          appearances: (row['apps'] as int?) ?? 0,
+          minutes: (row['minutes'] as int?) ?? 0,
+          goals: (row['goals'] as int?) ?? 0,
+          assists: (row['assists'] as int?) ?? 0,
+          mvps: (row['mvps'] as int?) ?? 0,
+          yellowCards: (row['yellows'] as int?) ?? 0,
+          redCards: (row['reds'] as int?) ?? 0,
+          rating: ((row['rating'] as num?) ?? 0).toDouble(),
+        ),
+    ];
+  }
 
   /// Full profile for the player sheet: contract, season stats and transfers.
   Future<PlayerDetail?> playerDetail(int playerId, {int? seasonId}) async {

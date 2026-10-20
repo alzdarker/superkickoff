@@ -196,6 +196,7 @@ class Tournament {
   final int rounds;
 
   bool get isLeague => organization == DbOrg.orgLeague;
+  bool get isInternational => organization == DbOrg.orgInternational;
   bool get isNationalCup => organization == DbOrg.orgNationalCup;
 
   factory Tournament.fromMap(Map<String, Object?> m) => Tournament(
@@ -219,6 +220,7 @@ class Tournament {
 class DbOrg {
   DbOrg._();
   static const int orgLeague = 1;
+  static const int orgInternational = 2;
   static const int orgNationalCup = 3;
 }
 
@@ -423,6 +425,41 @@ class LeaderRow {
   String get display => value == value.roundToDouble()
       ? '${value.toInt()}'
       : value.toStringAsFixed(1);
+}
+
+/// One row of the squad statistics table for the current season.
+class SquadStatRow {
+  SquadStatRow({
+    required this.playerId,
+    required this.name,
+    required this.positionId,
+    required this.profile,
+    required this.age,
+    required this.power,
+    required this.appearances,
+    required this.minutes,
+    required this.goals,
+    required this.assists,
+    required this.mvps,
+    required this.yellowCards,
+    required this.redCards,
+    required this.rating,
+  });
+
+  final int playerId;
+  final String name;
+  final int positionId;
+  final String profile;
+  final int age;
+  final int power;
+  final int appearances;
+  final int minutes;
+  final int goals;
+  final int assists;
+  final int mvps;
+  final int yellowCards;
+  final int redCards;
+  final double rating;
 }
 
 /// Active contract details shown in the player profile.
@@ -698,11 +735,11 @@ class PlayerAward {
   final int? goals;
 
   String get label => switch (type) {
-        t.awardTopScorer => 'Top scorer',
-        t.awardMvp => 'MVP',
-        t.awardYoungPlayer => 'Best young player',
-        _ => 'Award',
-      };
+    t.awardTopScorer => 'Top scorer',
+    t.awardMvp => 'MVP',
+    t.awardYoungPlayer => 'Best young player',
+    _ => 'Award',
+  };
 }
 
 /// One season in the manager's career history.
@@ -732,6 +769,28 @@ class CareerSeason {
   final String championships;
 
   String get record => '$wins-$draws-$losses';
+}
+
+/// One trophy won by a club, derived from a completed competition.
+class ClubTrophy {
+  ClubTrophy({
+    required this.tournamentId,
+    required this.tournamentName,
+    required this.organization,
+    required this.seasonId,
+    required this.seasonName,
+    required this.year,
+  });
+
+  final int tournamentId;
+  final String tournamentName;
+  final int organization;
+  final int seasonId;
+  final String seasonName;
+  final int year;
+
+  bool get isLeague => organization == DbOrg.orgLeague;
+  bool get isInternational => organization == DbOrg.orgInternational;
 }
 
 /// Combined club history payload for the club hub.

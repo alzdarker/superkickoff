@@ -10,6 +10,7 @@ import 'inbox_tab.dart';
 import 'club_hub_sheet.dart';
 import 'market_tab.dart';
 import 'match_screen.dart';
+import 'matchday_results_sheet.dart';
 import 'squad_tab.dart';
 import 'standings_tab.dart';
 import 'fixtures_tab.dart';
@@ -141,6 +142,15 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     await game.playAiMatchday();
+    if (context.mounted) {
+      await showMatchdayResults(
+        context,
+        matches: game.lastMatchday,
+        teams: game.lastMatchdayTeams,
+        userTeamId: game.userTeamId,
+        date: game.lastMatchday.isEmpty ? null : game.lastMatchday.first.date,
+      );
+    }
   }
 }
 
@@ -291,7 +301,19 @@ class OverviewTab extends StatelessWidget {
                   onPressed: game.nextDate == null
                       ? null
                       : () async {
-                          await context.read<CareerProvider>().playAiMatchday();
+                          final CareerProvider provider = context
+                              .read<CareerProvider>();
+                          await provider.playAiMatchday();
+                          if (!context.mounted) return;
+                          await showMatchdayResults(
+                            context,
+                            matches: provider.lastMatchday,
+                            teams: provider.lastMatchdayTeams,
+                            userTeamId: provider.userTeamId,
+                            date: provider.lastMatchday.isEmpty
+                                ? null
+                                : provider.lastMatchday.first.date,
+                          );
                         },
                   child: const Text('Simulate week'),
                 ),
@@ -315,7 +337,7 @@ class OverviewTab extends StatelessWidget {
         style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
       ),
       Text(
-        '#${t.power}',
+        'PWR ${t.power}',
         style: const TextStyle(fontSize: 10, color: AppTheme.textDim),
       ),
     ],

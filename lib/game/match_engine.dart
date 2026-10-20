@@ -35,6 +35,7 @@ class Lineup {
     Formation formation = Formation.f442,
     int fitnessFloor = 35,
     Set<int> bannedIds = const <int>{},
+    List<int> preferredIds = const <int>[],
   }) {
     final Set<int> unavailable = <int>{};
     final List<Player> eligible = <Player>[];
@@ -50,6 +51,16 @@ class Lineup {
     }
     final List<Player> sorted = List<Player>.of(eligible)
       ..sort((Player a, Player b) => effective(b).compareTo(effective(a)));
+
+    if (preferredIds.isNotEmpty) {
+      return _withPreferred(
+        preferredIds: preferredIds,
+        eligible: eligible,
+        sorted: sorted,
+        formation: formation,
+        unavailable: unavailable,
+      );
+    }
 
     final Map<int, int> need = <int, int>{
       1: needGK,
@@ -109,6 +120,94 @@ class Lineup {
       ...chosen[4]!,
     ];
     return Lineup._(starters, bench, unavailable);
+  }
+
+  /// Starts the players the manager dragged into the XI, then fills any
+  /// remaining slot from the best available squad members.
+  static Lineup _withPreferred({
+    required List<int> preferredIds,
+    required List<Player> eligible,
+    required List<Player> sorted,
+    required Formation formation,
+    required Set<int> unavailable,
+  }) {
+    final Map<int, Player> byId = <int, Player>{
+      for (final Player p in eligible) p.playerId: p,
+    };
+    final Set<int> used = <int>{};
+    final List<Player> starters = <Player>[];
+    for (final int id in preferredIds) {
+      if (starters.length >= 11) break;
+      final Player? p = byId[id];
+      if (p == null || used.contains(id)) continue;
+      starters.add(p);
+      used.add(id);
+    }
+
+    final Map<int, int> need = <int, int>{
+      1: needGK,
+      2: formation.defenders,
+      3: formation.midfielders,
+      4: formation.forwards,
+    };
+    int count(int group) =>
+        starters.where((Player p) => groupOf(p) == group).length;
+    final List<Player> remaining = sorted
+        .where((Player p) => !used.contains(p.playerId))
+        .toList();
+
+    Player? take(int group) {
+      for (int i = 0; i < remaining.length; i++) {
+        if (groupOf(remaining[i]) == group) {
+          final Player p = remaining.removeAt(i);
+          used.add(p.playerId);
+          return p;
+        }
+      }
+      return null;
+    }
+
+    // A saved XI may be missing a keeper after transfers; always field one.
+    if (count(1) == 0) {
+      final Player? gk = take(1);
+      if (gk != null) {
+        if (starters.length >= 11) starters.removeLast();
+        starters.add(gk);
+      }
+    }
+
+    for (int g = 1; g <= 4; g++) {
+      while (starters.length < 11 && count(g) < need[g]!) {
+        final Player? p = take(g);
+        if (p == null) break;
+        starters.add(p);
+      }
+    }
+
+    const Map<int, List<int>> adjacency = <int, List<int>>{
+      1: <int>[],
+      2: <int>[3, 4],
+      3: <int>[2, 4],
+      4: <int>[3],
+    };
+    if (starters.length < 11) {
+      for (int g = 1; g <= 4; g++) {
+        while (starters.length < 11 && count(g) < need[g]!) {
+          Player? p;
+          for (final int from in adjacency[g]!) {
+            p = take(from);
+            if (p != null) break;
+          }
+          if (p == null) break;
+          starters.add(p);
+        }
+      }
+    }
+    while (starters.length < 11 && remaining.isNotEmpty) {
+      starters.add(remaining.removeAt(0));
+    }
+
+    return Lineup._(starters, remaining.take(7).toList(), unavailable);
   }
 
   // ----- team strength metrics ------------------------------------------------
@@ -242,6 +341,8 @@ class MatchInput {
     this.awayFormation = Formation.f442,
     this.homeTeamId = 0,
     this.awayTeamId = 0,
+    this.homeLineupIds = const <int>[],
+    this.awayLineupIds = const <int>[],
     this.refereeTemper = 2,
   });
 
@@ -256,6 +357,8 @@ class MatchInput {
   final int homePower;
   final Formation homeFormation;
   final Formation awayFormation;
+  final List<int> homeLineupIds;
+  final List<int> awayLineupIds;
   final int refereeTemper; // 1 lenient ... 5 grumpy
 }
 
@@ -333,11 +436,13 @@ class MatchEngine {
       input.homeSquad,
       formation: input.homeFormation,
       bannedIds: bannedIds,
+      preferredIds: input.homeLineupIds,
     );
     final Lineup awayLineup = Lineup.best(
       input.awaySquad,
       formation: input.awayFormation,
       bannedIds: bannedIds,
+      preferredIds: input.awayLineupIds,
     );
     return _simulate(input, homeLineup, awayLineup, recordEvents: recordEvents);
   }

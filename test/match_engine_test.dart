@@ -89,6 +89,24 @@ void main() {
       expect(counts[4], 3);
     });
 
+    test('starts the players picked by the manager', () {
+      final List<Player> squad = buildSquad(10);
+      final List<int> picked = squad
+          .take(11)
+          .map((Player p) => p.playerId)
+          .toList();
+      final Lineup lineup = Lineup.best(squad, preferredIds: picked);
+      expect(lineup.starters.length, 11);
+      for (final int id in picked) {
+        expect(
+          lineup.starters.any((Player p) => p.playerId == id),
+          isTrue,
+          reason: 'picked player $id must start',
+        );
+      }
+      expect(lineup.starters.where((Player p) => p.positionId == 1).length, 1);
+    });
+
     test('excludes injured and suspended players', () {
       final List<Player> squad = buildSquad(2);
       final Player keeper = squad.first;
