@@ -52,12 +52,20 @@ class SquadRepository {
   }) {
     if (currentValue <= 0 || newPower <= previousPower) return currentValue;
     final int increase = newPower - previousPower;
-    final double ratePerOverall = age <= 27
-        ? 0.05
+    // Steeper curve: each overall point is worth more on an already-valuable
+    // player, and younger players appreciate faster.
+    final double baseRate = age <= 23
+        ? 0.16
+        : age <= 27
+        ? 0.14
         : age <= 30
-        ? 0.04
-        : 0.025;
-    return (currentValue * (1 + ratePerOverall * increase)).round();
+        ? 0.10
+        : 0.06;
+    // Higher overall points carry premium value per point.
+    final double overallFactor = 0.6 + previousPower / 100;
+    final double rate = baseRate * overallFactor;
+    final int gain = (currentValue * rate * increase).round();
+    return currentValue + gain;
   }
 
   /// Updates the market value after an overall increase.

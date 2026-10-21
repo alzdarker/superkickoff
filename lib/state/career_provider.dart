@@ -9,6 +9,7 @@ import '../data/db/schema.dart' as t;
 import '../data/models/models.dart';
 import '../data/repositories/match_repository.dart';
 import '../data/repositories/message_repository.dart';
+import '../data/repositories/prize_repository.dart';
 import '../data/repositories/reference_repository.dart';
 import '../data/repositories/season_repository.dart';
 import '../data/repositories/squad_repository.dart';
@@ -31,6 +32,7 @@ class CareerProvider extends ChangeNotifier {
   late MatchRepository _matchRepo;
   late MessageRepository _messages;
   late TransferRepository _transfers;
+  late PrizeRepository _prizes;
   late CareerService _service;
   late MatchEngine _engine;
   final Random _rng = Random();
@@ -94,6 +96,7 @@ class CareerProvider extends ChangeNotifier {
     _matchRepo = MatchRepository(_db);
     _messages = MessageRepository(_db);
     _transfers = TransferRepository(_db);
+    _prizes = PrizeRepository(_db);
     _engine = MatchEngine();
     _service = CareerService(
       _db,
@@ -102,6 +105,7 @@ class CareerProvider extends ChangeNotifier {
       squads: _squads,
       matches: _matchRepo,
       messages: _messages,
+      prizes: _prizes,
       transfers: _transfers,
       engine: _engine,
       generator: SeasonGenerator(_db, random: _rng),

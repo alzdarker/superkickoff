@@ -8,12 +8,14 @@ import '../data/db/schema.dart' as t;
 import '../data/models/models.dart';
 import '../data/repositories/match_repository.dart';
 import '../data/repositories/message_repository.dart';
+import '../data/repositories/prize_repository.dart';
 import '../data/repositories/reference_repository.dart';
 import '../data/repositories/season_repository.dart';
 import '../data/repositories/squad_repository.dart';
 import '../data/repositories/transfer_repository.dart';
 import 'formation.dart';
 import 'match_engine.dart';
+import 'prize_engine.dart';
 import 'season_generator.dart';
 
 /// Orchestrates career progression on top of the repositories and the match
@@ -30,6 +32,7 @@ class CareerService {
     required MessageRepository messages,
     required MatchEngine engine,
     required SeasonGenerator generator,
+    PrizeRepository? prizes,
     TransferRepository? transfers,
     Random? random,
     this.marketTickChance = 0.45,
@@ -38,6 +41,7 @@ class CareerService {
        _squads = squads,
        _matchRepo = matches,
        _messages = messages,
+       _prizes = prizes,
        _transfers = transfers,
        _engine = engine,
        _gen = generator,
@@ -49,6 +53,7 @@ class CareerService {
   final SquadRepository _squads;
   final MatchRepository _matchRepo;
   final MessageRepository _messages;
+  final PrizeRepository? _prizes;
   final TransferRepository? _transfers;
   final MatchEngine _engine;
   final SeasonGenerator _gen;
@@ -490,6 +495,13 @@ class CareerService {
     return '$amount';
   }
 
+  static String _todayIso() {
+    final DateTime now = DateTime.now();
+    return '${now.year.toString().padLeft(4, '0')}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+  }
+
   // -------------------------------------------------------- cup progression
 
   /// If the current cup phase fully finished, schedules the next round.
@@ -655,6 +667,251 @@ class CareerService {
     return (remaining ?? 1) == 0;
   }
 
+  /// Computes and pays prize money for every completed competition, using the
+  /// configuration-driven [PrizeEngine]. Payouts are idempotent per season.
+  Future<Set<String>> _awardCompetitionPrizes({
+    required int seasonId,
+    required int userTeamId,
+    required List<Tournament> tournaments,
+  }) async {
+    final PrizeRepository? prizes = _prizes;
+    if (prizes == null || tournaments.isEmpty) return <String>{};
+
+    final List<int> ids = tournaments
+        .map((Tournament tour) => tour.tournamentId)
+        .toList();
+    final PrizeEngine engine = PrizeEngine(
+      configOverrides: await prizes.overrides(ids),
+    );
+    final Set<String> titles = <String>{};
+    final String date = _todayIso();
+
+    for (final Tournament tour in tournaments) {
+      final CompetitionProfile? profile = await _competitionProfile(
+        seasonId,
+        tour,
+      );
+      if (profile == null) continue;
+
+      CompetitionPrizeResult? result;
+      if (tour.isLeague) {
+        final List<StandingRow> table = await _seasons.standings(
+          seasonId,
+          tour.tournamentId,
+        );
+        if (table.isEmpty) continue;
+        result = engine.leaguePrizes(
+          tournamentId: tour.tournamentId,
+          profile: profile,
+          rankedTeamIds: table.map((StandingRow r) => r.teamId).toList(),
+        );
+        if (table.first.teamId == userTeamId) titles.add(tour.name);
+        final Team? champion = await _refs.teamById(table.first.teamId);
+        await _messages.insert(
+          title: 'Champion!',
+          body:
+              '${champion?.name ?? table.first.name} are champions of ${tour.name}.',
+          sender: 'League',
+        );
+      } else {
+        final int? winnerId = await _knockoutWinner(
+          seasonId,
+          tour.tournamentId,
+        );
+        if (winnerId == null) continue;
+        final Map<int, int> reached = await _knockoutRoundsReached(
+          seasonId,
+          tour.tournamentId,
+        );
+        if (reached.isEmpty) continue;
+        final int maxRound = reached.values.reduce(
+          (int a, int b) => a > b ? a : b,
+        );
+        final int? runnerUpId = await _knockoutRunnerUp(
+          seasonId,
+          tour.tournamentId,
+          maxRound,
+          winnerId,
+        );
+        final Map<String, Map<int, int>> tally = await _matchTally(
+          seasonId,
+          tour.tournamentId,
+        );
+        result = engine.cupPrizes(
+          tournamentId: tour.tournamentId,
+          kind: profile.kind,
+          profile: profile,
+          reachedRoundByTeam: reached,
+          maxRound: maxRound,
+          winnerTeamId: winnerId,
+          runnerUpTeamId: runnerUpId,
+          winsByTeam: tally['wins'],
+          drawsByTeam: tally['draws'],
+        );
+        if (winnerId == userTeamId) titles.add(tour.name);
+        final Team? winner = await _refs.teamById(winnerId);
+        await _messages.insert(
+          title: 'Cup Glory',
+          body: '${winner?.name ?? 'A club'} lifts the ${tour.name} trophy.',
+          sender: 'Cup',
+        );
+      }
+
+      final List<PrizeAward> paid = await prizes.pay(
+        seasonId: seasonId,
+        result: result,
+        date: date,
+      );
+      final List<PrizeAward> mine = paid
+          .where((PrizeAward a) => a.teamId == userTeamId)
+          .toList();
+      if (mine.isNotEmpty) {
+        await _messages.insert(
+          title: 'Prize money: ${tour.name}',
+          body: '${tour.name} paid your club '
+              '${_money(mine.fold<int>(0, (int s, PrizeAward a) => s + a.amount))} '
+              'in prize money.',
+          teamId: userTeamId,
+          sender: 'Competition',
+        );
+      }
+    }
+    return titles;
+  }
+
+  /// Builds the input profile used to scale a competition's prize money.
+  Future<CompetitionProfile?> _competitionProfile(
+    int seasonId,
+    Tournament tour,
+  ) async {
+    final int? entrants = Sqflite.firstIntValue(
+      await db.rawQuery(
+        '''
+        SELECT COUNT(DISTINCT team_id) FROM (
+          SELECT home_team_id AS team_id FROM matches
+          WHERE season_id = ? AND tournament_id = ?
+          UNION
+          SELECT away_team_id FROM matches
+          WHERE season_id = ? AND tournament_id = ?
+        )
+      ''',
+        <Object?>[seasonId, tour.tournamentId, seasonId, tour.tournamentId],
+      ),
+    );
+    final int clubCount = entrants ?? tour.slots;
+    if (clubCount <= 0) return null;
+
+    final List<Map<String, Object?>> countryRows = await db.rawQuery(
+      '''
+      SELECT MAX(c.power) AS power, MAX(c.confederation) AS confederation
+      FROM tournament_countries tc
+      JOIN countries c ON c.country_id = tc.country_id
+      WHERE tc.tournament_id = ?
+    ''',
+      <Object?>[tour.tournamentId],
+    );
+    final int countryPower =
+        ((countryRows.isEmpty ? null : countryRows.first['power']) as int?) ??
+        60;
+    final int confederation =
+        ((countryRows.isEmpty ? null : countryRows.first['confederation'])
+                as int?) ??
+            0;
+
+    final CompetitionKind kind = PrizeEngine.kindOf(
+      organization: tour.organization,
+      entrants: clubCount,
+      nameHintSlots: tour.slots,
+    );
+    return CompetitionProfile(
+      kind: kind,
+      tier: max(tour.divisionId, 1),
+      entrants: clubCount,
+      countryPower: countryPower,
+      confederation: confederation,
+      slots: tour.rounds,
+      legacyPrizeTeams: tour.prizeTeams,
+    );
+  }
+
+  /// Deepest knockout round each club reached in a cup competition.
+  Future<Map<int, int>> _knockoutRoundsReached(
+    int seasonId,
+    int tournamentId,
+  ) async {
+    final List<Map<String, Object?>> rows = await db.rawQuery(
+      '''
+      SELECT team_id, MAX(round_reached) AS round_reached FROM (
+        SELECT home_team_id AS team_id, phase AS round_reached FROM matches
+        WHERE season_id = ? AND tournament_id = ?
+        UNION ALL
+        SELECT away_team_id, phase FROM matches
+        WHERE season_id = ? AND tournament_id = ?
+      )
+      GROUP BY team_id
+    ''',
+      <Object?>[seasonId, tournamentId, seasonId, tournamentId],
+    );
+    return <int, int>{
+      for (final Map<String, Object?> row in rows)
+        row['team_id'] as int: (row['round_reached'] as int?) ?? 0,
+    };
+  }
+
+  /// Final runner-up: the club that lost the last knockout round.
+  Future<int?> _knockoutRunnerUp(
+    int seasonId,
+    int tournamentId,
+    int maxRound,
+    int winnerId,
+  ) async {
+    final List<Map<String, Object?>> rows = await db.rawQuery(
+      '''
+      SELECT home_team_id, away_team_id FROM matches
+      WHERE season_id = ? AND tournament_id = ? AND phase = ?
+        AND status = ? AND winner_id IS NOT NULL
+      LIMIT 1
+    ''',
+      <Object?>[seasonId, tournamentId, maxRound, t.matchFinished],
+    );
+    if (rows.isEmpty) return null;
+    final int home = rows.first['home_team_id'] as int;
+    final int away = rows.first['away_team_id'] as int;
+    final int runnerUp = home == winnerId ? away : home;
+    return runnerUp == winnerId ? null : runnerUp;
+  }
+
+  /// Wins and draws per club in a competition.
+  Future<Map<String, Map<int, int>>> _matchTally(
+    int seasonId,
+    int tournamentId,
+  ) async {
+    final Map<int, int> wins = <int, int>{};
+    final Map<int, int> draws = <int, int>{};
+    final List<Map<String, Object?>> rows = await db.rawQuery(
+      '''
+      SELECT home_team_id, away_team_id, home_goals, away_goals FROM matches
+      WHERE season_id = ? AND tournament_id = ? AND status = ?
+        AND home_goals IS NOT NULL AND away_goals IS NOT NULL
+    ''',
+      <Object?>[seasonId, tournamentId, t.matchFinished],
+    );
+    for (final Map<String, Object?> row in rows) {
+      final int home = row['home_team_id'] as int;
+      final int away = row['away_team_id'] as int;
+      final int hg = (row['home_goals'] as int?) ?? 0;
+      final int ag = (row['away_goals'] as int?) ?? 0;
+      if (hg == ag) {
+        draws[home] = (draws[home] ?? 0) + 1;
+        draws[away] = (draws[away] ?? 0) + 1;
+        continue;
+      }
+      final int winner = hg > ag ? home : away;
+      wins[winner] = (wins[winner] ?? 0) + 1;
+    }
+    return <String, Map<int, int>>{'wins': wins, 'draws': draws};
+  }
+
   /// End-of-season flow: prizes, promotion/relegation, ageing & retirement,
   /// archiving (which also aggregates player stats), then the next season.
   Future<Season> completeSeason({
@@ -670,39 +927,11 @@ class CareerService {
     );
 
     onProgress('Awarding prizes...');
-    final Set<String> titles = <String>{};
-    for (final Tournament tour in tournaments) {
-      if (tour.isLeague) {
-        final List<StandingRow> table = await _seasons.standings(
-          current.seasonId,
-          tour.tournamentId,
-        );
-        if (table.isEmpty) continue;
-        await _matchRepo.adjustBudget(table.first.teamId, tour.prizeTeams);
-        final Team? champion = await _refs.teamById(table.first.teamId);
-        if (table.first.teamId == userTeamId) titles.add(tour.name);
-        await _messages.insert(
-          title: 'Champion!',
-          body:
-              '${champion?.name ?? table.first.name} are champions of ${tour.name}.',
-          sender: 'League',
-        );
-      } else {
-        final int? cupWinnerId = await _knockoutWinner(
-          current.seasonId,
-          tour.tournamentId,
-        );
-        if (cupWinnerId == null) continue;
-        await _matchRepo.adjustBudget(cupWinnerId, tour.prizeTeams);
-        final Team? winner = await _refs.teamById(cupWinnerId);
-        if (cupWinnerId == userTeamId) titles.add(tour.name);
-        await _messages.insert(
-          title: 'Cup Glory',
-          body: '${winner?.name ?? 'A club'} lifts the ${tour.name} trophy.',
-          sender: 'Cup',
-        );
-      }
-    }
+    final Set<String> titles = await _awardCompetitionPrizes(
+      seasonId: current.seasonId,
+      userTeamId: userTeamId,
+      tournaments: tournaments,
+    );
 
     onProgress('Recording season history...');
     await _seasons.recordSeasonAwards(

@@ -90,6 +90,30 @@ class AppDatabase {
       )
     ''');
     await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${t.competitionPrizeRules} (
+        tournament_id INTEGER PRIMARY KEY,
+        base_pool INTEGER NOT NULL,
+        participation_per_club INTEGER NOT NULL DEFAULT 0,
+        win_bonus INTEGER NOT NULL DEFAULT 0,
+        draw_bonus INTEGER NOT NULL DEFAULT 0,
+        champion_bonus INTEGER NOT NULL DEFAULT 0,
+        runner_up_bonus INTEGER NOT NULL DEFAULT 0,
+        position_weights TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${t.competitionPrizeAwards} (
+        award_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        season_id INTEGER NOT NULL,
+        tournament_id INTEGER NOT NULL,
+        team_id INTEGER NOT NULL,
+        amount INTEGER NOT NULL,
+        reason TEXT,
+        created_date TEXT NOT NULL,
+        UNIQUE (season_id, tournament_id, team_id)
+      )
+    ''');
+    await db.execute('''
       CREATE TABLE IF NOT EXISTS ${t.transferOffers} (
         offer_id INTEGER PRIMARY KEY AUTOINCREMENT,
         player_id INTEGER NOT NULL,
