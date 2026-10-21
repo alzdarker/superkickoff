@@ -103,5 +103,20 @@ void main() {
     final int after = (await db.rawQuery('SELECT COUNT(*) c FROM ${t.news}')).first['c'] as int;
     expect(after, before);
 
+    // Group stories must refer to the correct letter (groupId 1 -> Grup A, 2 -> Grup B).
+    final List<Map<String, Object?>> groupStories = await db.rawQuery(
+      "SELECT ref, headline FROM ${t.news} WHERE ref LIKE 'grp:%'",
+    );
+    for (final Map<String, Object?> row in groupStories) {
+      final String ref = row['ref'] as String;
+      final int groupId = int.parse(ref.split(':')[3]);
+      final String expectedLetter = String.fromCharCode(64 + groupId);
+      expect(
+        (row['headline'] as String).contains('Grup $expectedLetter'),
+        isTrue,
+        reason: 'Group story for groupId $groupId must refer to Grup $expectedLetter',
+      );
+    }
+
   });
 }

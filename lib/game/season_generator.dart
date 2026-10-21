@@ -389,8 +389,9 @@ class SeasonGenerator {
   }
 
   /// Schedules the NEXT knockout round once a cup phase fully finished.
-  /// [survivors] are the winning team ids (byes included). Returns the
-  /// number of matches scheduled.
+  /// [survivors] are the winning team ids (byes included). When [pairs] is
+  /// provided, explicit match pairings are scheduled instead of power-seeding.
+  /// Returns the number of matches scheduled.
   Future<int> scheduleCupRound(
     int seasonId,
     int cupTournamentId,
@@ -398,32 +399,53 @@ class SeasonGenerator {
     required int phase,
     required DateTime date,
     required Map<int, Team> allTeams,
+    List<(int, int)>? pairs,
   }) async {
-    final List<int> ids = List<int>.of(survivors)
-      ..sort(
-        (int a, int b) =>
-            (allTeams[b]?.power ?? 0).compareTo(allTeams[a]?.power ?? 0),
-      );
     final List<Map<String, Object?>> rows = <Map<String, Object?>>[];
-    while (ids.length > 1) {
-      // Pair strongest vs weakest for balance.
-      final int a = ids.removeAt(0);
-      final int b = ids.removeLast();
-      final Team? homeTeam = allTeams[a];
-      final Team? awayTeam = allTeams[b];
-      if (homeTeam == null || awayTeam == null) continue;
-      rows.add(
-        _matchRow(
-          seasonId,
-          cupTournamentId,
-          homeTeam,
-          awayTeam,
-          round: phase,
-          phase: phase,
-          leg: 1,
-          date: _iso(date),
-        ),
-      );
+    if (pairs != null) {
+      for (final (int a, int b) in pairs) {
+        final Team? homeTeam = allTeams[a];
+        final Team? awayTeam = allTeams[b];
+        if (homeTeam == null || awayTeam == null) continue;
+        rows.add(
+          _matchRow(
+            seasonId,
+            cupTournamentId,
+            homeTeam,
+            awayTeam,
+            round: phase,
+            phase: phase,
+            leg: 1,
+            date: _iso(date),
+          ),
+        );
+      }
+    } else {
+      final List<int> ids = List<int>.of(survivors)
+        ..sort(
+          (int a, int b) =>
+              (allTeams[b]?.power ?? 0).compareTo(allTeams[a]?.power ?? 0),
+        );
+      while (ids.length > 1) {
+        // Pair strongest vs weakest for balance.
+        final int a = ids.removeAt(0);
+        final int b = ids.removeLast();
+        final Team? homeTeam = allTeams[a];
+        final Team? awayTeam = allTeams[b];
+        if (homeTeam == null || awayTeam == null) continue;
+        rows.add(
+          _matchRow(
+            seasonId,
+            cupTournamentId,
+            homeTeam,
+            awayTeam,
+            round: phase,
+            phase: phase,
+            leg: 1,
+            date: _iso(date),
+          ),
+        );
+      }
     }
     await _insertMatches(rows);
     return rows.length;

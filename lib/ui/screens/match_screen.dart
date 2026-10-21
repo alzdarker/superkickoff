@@ -414,20 +414,15 @@ class _MatchScreenState extends State<MatchScreen> {
               )
             : Row(
                 children: <Widget>[
-                  for (final double s in <double>[1, 2, 4])
-                    Expanded(
-                      child: TextButton.icon(
-                        onPressed: () => setState(() {
-                          speed = s;
-                          startClock();
-                        }),
-                        icon: Icon(
-                          speed == s ? Icons.check : Icons.speed,
-                          size: 14,
-                        ),
-                        label: Text('${s}x'),
-                      ),
-                    ),
+                  OutlinedButton.icon(
+                    onPressed: () => setState(() {
+                      speed = speed == 1 ? 2 : (speed == 2 ? 4 : 1);
+                      startClock();
+                    }),
+                    icon: const Icon(Icons.speed, size: 16),
+                    label: Text('${speed.toInt()}x'),
+                  ),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: FilledButton.icon(
                       onPressed: finishInstantly,

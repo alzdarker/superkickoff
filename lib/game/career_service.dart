@@ -602,18 +602,16 @@ class CareerService {
         ),
       );
       if ((knockoutMatches ?? 0) == 0) {
-        final List<int> qualified = <int>[
-          for (final GroupTable group in groups)
-            for (final StandingRow row in group.rows.take(2)) row.teamId,
-        ];
-        if (qualified.length < 2) return false;
+        final List<(int, int)> pairs = _pairGroupKnockout(groups);
+        if (pairs.isEmpty) return false;
         final int scheduled = await _gen.scheduleCupRound(
           seasonId,
           cupTournamentId,
-          qualified,
+          <int>[for (final (int a, int b) in pairs) ...<int>[a, b]],
           phase: 1,
           date: await _nextCupDate(seasonId, cupTournamentId),
           allTeams: teamCache,
+          pairs: pairs,
         );
         return scheduled > 0;
       }
@@ -626,6 +624,7 @@ class CareerService {
         AND phase = (SELECT MAX(phase) FROM matches
                      WHERE season_id = ? AND tournament_id = ?)
         AND status = ? AND winner_id IS NOT NULL
+      ORDER BY match_id ASC
     ''',
       <Object?>[
         seasonId,
@@ -652,6 +651,10 @@ class CareerService {
         : rowsMax.first['max_phase'] as int?;
     if (maxPhase == null) return false;
     final DateTime date = await _nextCupDate(seasonId, cupTournamentId);
+    final List<(int, int)> nextPairs = <(int, int)>[];
+    for (int i = 0; i + 1 < survivors.length; i += 2) {
+      nextPairs.add((survivors[i], survivors[i + 1]));
+    }
     final int scheduled = await _gen.scheduleCupRound(
       seasonId,
       cupTournamentId,
@@ -659,8 +662,45 @@ class CareerService {
       phase: maxPhase + 1,
       date: date,
       allTeams: teamCache,
+      pairs: nextPairs.length * 2 == survivors.length ? nextPairs : null,
     );
     return scheduled > 0;
+  }
+
+  /// Pairs group winners against runners-up across different groups, placing
+  /// teams from the same group in opposite halves of the bracket tree so they
+  /// cannot meet before the final.
+  static List<(int, int)> _pairGroupKnockout(List<GroupTable> groups) {
+    final List<(int, int)> pairs = <(int, int)>[];
+    if (groups.length < 2) {
+      if (groups.isNotEmpty && groups[0].rows.length >= 2) {
+        pairs.add((groups[0].rows[0].teamId, groups[0].rows[1].teamId));
+      }
+      return pairs;
+    }
+    if (groups.length.isEven) {
+      // Top bracket half: even group winners vs odd group runners-up.
+      for (int i = 0; i < groups.length; i += 2) {
+        if (groups[i].rows.isNotEmpty && groups[i + 1].rows.length > 1) {
+          pairs.add((groups[i].rows[0].teamId, groups[i + 1].rows[1].teamId));
+        }
+      }
+      // Bottom bracket half: odd group winners vs even group runners-up.
+      for (int i = 0; i < groups.length; i += 2) {
+        if (groups[i + 1].rows.isNotEmpty && groups[i].rows.length > 1) {
+          pairs.add((groups[i + 1].rows[0].teamId, groups[i].rows[1].teamId));
+        }
+      }
+    } else {
+      // Fallback for odd group counts: cycle winner of group i vs runner-up of (i+1)%N.
+      for (int i = 0; i < groups.length; i++) {
+        final int next = (i + 1) % groups.length;
+        if (groups[i].rows.isNotEmpty && groups[next].rows.length > 1) {
+          pairs.add((groups[i].rows[0].teamId, groups[next].rows[1].teamId));
+        }
+      }
+    }
+    return pairs;
   }
 
   /// Safe weekday (Tuesdays or Wednesdays) after the latest fixture of a cup,

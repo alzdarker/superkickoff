@@ -776,7 +776,7 @@ class NewsEngine {
       if (table.length < 3) continue;
       final _Row top = table.first;
       if (top.played < 2 || top.pts - table[1].pts < 2) continue;
-      final String groupName = String.fromCharCode(65 + m.groupId!);
+      final String groupName = String.fromCharCode(64 + m.groupId!);
       out.add(
         NewsItem(
           ref: 'grp:${c.seasonId}:${m.tournamentId}:${m.groupId}:${top.played}',

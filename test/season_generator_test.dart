@@ -382,6 +382,23 @@ void main() {
       groups.length,
       reason: 'two qualifiers per group make one tie per group',
     );
+
+    // Each knockout tie must pair clubs from different groups.
+    final Map<int, int> teamToGroup = <int, int>{};
+    for (final GroupTable g in groups) {
+      for (final StandingRow r in g.rows) {
+        teamToGroup[r.teamId] = g.groupId;
+      }
+    }
+    for (final Map<String, Object?> tie in knockout) {
+      final int homeGroup = teamToGroup[tie['home_team_id']]!;
+      final int awayGroup = teamToGroup[tie['away_team_id']]!;
+      expect(
+        homeGroup,
+        isNot(equals(awayGroup)),
+        reason: 'clubs from the same group must not face each other in the first knockout round',
+      );
+    }
   });
 
   test('double round robin pairs every team once per round', () {
