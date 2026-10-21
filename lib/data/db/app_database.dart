@@ -108,6 +108,16 @@ class AppDatabase {
         'ALTER TABLE ${t.messages} ADD COLUMN transfer_offer_id INTEGER',
       );
     }
+    // The bundled database only gave Persib a transfer budget. Backfill every
+    // zero-budget club once, scaling available funds to club strength.
+    await db.execute('''
+      UPDATE teams
+      SET budget = CASE
+        WHEN power <= 40 THEN 500000
+        ELSE MAX(500000, (power - 40) * (power - 40) * 40000)
+      END
+      WHERE COALESCE(budget, 0) <= 0
+    ''');
     await db.execute('''
       UPDATE teams
       SET abbreviation = CASE name

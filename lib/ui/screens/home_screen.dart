@@ -47,15 +47,27 @@ class _HomeScreenState extends State<HomeScreen> {
             children: <Widget>[
               CrestAvatar(team: team, radius: 14),
               const SizedBox(width: 8),
-              Text(team.name, style: const TextStyle(fontSize: 16)),
+              Flexible(
+                child: Text(
+                  team.name,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 15),
+                ),
+              ),
             ],
           ),
           actions: <Widget>[
-            Chip(
-              avatar: const Icon(Icons.calendar_month, size: 14),
-              label: Text(
-                game.season?.name ?? 'Season ?',
-                style: const TextStyle(fontSize: 11),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Chip(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+                avatar: const Icon(Icons.calendar_month, size: 13),
+                label: Text(
+                  game.season?.name ?? 'Season ?',
+                  style: const TextStyle(fontSize: 10),
+                ),
               ),
             ),
             if (game.cups.isNotEmpty)
@@ -98,6 +110,8 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         bottomNavigationBar: NavigationBar(
           selectedIndex: _index,
+          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+          height: 64,
           onDestinationSelected: (int i) {
             setState(() => _index = i);
           },

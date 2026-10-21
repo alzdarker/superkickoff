@@ -358,6 +358,7 @@ class Message {
     required this.sender,
     required this.isRead,
     required this.type,
+    this.playerId,
     this.transferOfferId,
   });
 
@@ -368,6 +369,7 @@ class Message {
   final String? sender;
   final bool isRead;
   final int type;
+  final int? playerId;
   final int? transferOfferId;
 
   factory Message.fromMap(Map<String, Object?> m) => Message(
@@ -378,6 +380,7 @@ class Message {
     sender: m['sender'] as String?,
     isRead: (m['is_read'] as int? ?? 0) == 1,
     type: (m['type'] as int?) ?? 0,
+    playerId: m['player_id'] as int?,
     transferOfferId: m['transfer_offer_id'] as int?,
   );
 }

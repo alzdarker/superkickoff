@@ -62,7 +62,28 @@ class InboxTab extends StatelessWidget {
       builder: (BuildContext dialogContext) {
         final int? offerId = message.transferOfferId;
         if (offerId == null) {
-          return _messageDialog(dialogContext, message, const <Widget>[]);
+          final List<Widget> actions = <Widget>[];
+          if (message.playerId != null &&
+              message.title.startsWith('Wage Increase Request')) {
+            actions.add(
+              FilledButton(
+                onPressed: () async {
+                  final String? err = await game.renewContract(message.playerId!);
+                  if (!dialogContext.mounted) return;
+                  Navigator.of(dialogContext).pop();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(err ?? 'Contract extended with wage increase!'),
+                      ),
+                    );
+                  }
+                },
+                child: const Text('Grant Wage Increase'),
+              ),
+            );
+          }
+          return _messageDialog(dialogContext, message, actions);
         }
         return FutureBuilder<TransferOffer?>(
           future: game.transferOffer(offerId),

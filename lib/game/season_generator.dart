@@ -550,11 +550,11 @@ class SeasonGenerator {
     return _startDate.add(Duration(days: 7 * weekOffset - 3));
   }
 
-  /// Continental rounds get their own mid-week slot so they never land on the
-  /// domestic cup's dates.
+  /// Continental rounds get their own mid-week slot (Tuesdays) so they never
+  /// land on the domestic cup's dates (Wednesdays) or league matchdays (Saturdays).
   DateTime _internationalDate(int index) {
     final int weekOffset = 3 + index * 4;
-    return _startDate.add(Duration(days: 7 * weekOffset - 2));
+    return _startDate.add(Duration(days: 7 * weekOffset - 4));
   }
 
   /// Sorts teams by power (seeding) and returns their ids.

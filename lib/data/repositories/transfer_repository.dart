@@ -208,6 +208,36 @@ class TransferRepository {
         'date': _todayIso(),
       });
 
+      // Recalculate dynamic team power for both clubs.
+      Future<void> updatePower(int teamId) async {
+        final List<Map<String, Object?>> rows = await txn.rawQuery(
+          '''
+          SELECT p.power
+          FROM players p
+          JOIN team_players tp ON tp.player_id = p.player_id
+          WHERE tp.team_id = ? AND p.status_id = ?
+          ORDER BY p.power DESC
+          LIMIT 11
+        ''',
+          <Object?>[teamId, t.statusActive],
+        );
+        if (rows.isEmpty) return;
+        final int sum = rows.fold<int>(
+          0,
+          (int acc, Map<String, Object?> r) =>
+              acc + ((r['power'] as int?) ?? 0),
+        );
+        final int newPower = (sum / rows.length).round();
+        await txn.update(
+          t.teams,
+          <String, Object?>{'power': newPower},
+          where: 'team_id = ?',
+          whereArgs: <Object?>[teamId],
+        );
+      }
+      await updatePower(offer.toTeamId);
+      await updatePower(offer.fromTeamId);
+
       // Mark offer as completed
       await txn.update(
         t.transferOffers,

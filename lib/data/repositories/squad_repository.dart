@@ -12,6 +12,87 @@ class SquadRepository {
 
   final Database db;
 
+  /// Recomputes and updates the club's overall power based on its squad
+  /// composition (average power of the top 11 active squad players).
+  Future<int> refreshTeamPower(int teamId, [Transaction? txn]) async {
+    final DatabaseExecutor executor = txn ?? db;
+    final List<Map<String, Object?>> rows = await executor.rawQuery(
+      '''
+      SELECT p.power
+      FROM players p
+      JOIN team_players tp ON tp.player_id = p.player_id
+      WHERE tp.team_id = ? AND p.status_id = ?
+      ORDER BY p.power DESC
+      LIMIT 11
+    ''',
+      <Object?>[teamId, t.statusActive],
+    );
+    if (rows.isEmpty) return 0;
+    final int sum = rows.fold<int>(
+      0,
+      (int acc, Map<String, Object?> r) => acc + ((r['power'] as int?) ?? 0),
+    );
+    final int newPower = (sum / rows.length).round();
+    await executor.update(
+      t.teams,
+      <String, Object?>{'power': newPower},
+      where: 'team_id = ?',
+      whereArgs: <Object?>[teamId],
+    );
+    return newPower;
+  }
+
+  /// Returns an MV derived from the player's existing value, so a higher
+  /// overall can never reset a valuable player to a lower price tier.
+  static int valueAfterOverallChange({
+    required int currentValue,
+    required int previousPower,
+    required int newPower,
+    required int age,
+  }) {
+    if (currentValue <= 0 || newPower <= previousPower) return currentValue;
+    final int increase = newPower - previousPower;
+    final double ratePerOverall = age <= 27
+        ? 0.05
+        : age <= 30
+        ? 0.04
+        : 0.025;
+    return (currentValue * (1 + ratePerOverall * increase)).round();
+  }
+
+  /// Updates the market value after an overall increase.
+  Future<void> refreshPlayerValue(
+    int playerId, {
+    required int previousPower,
+    Transaction? txn,
+  }) async {
+    final DatabaseExecutor ex = txn ?? db;
+    final List<Map<String, Object?>> rows = await ex.query(
+      t.players,
+      columns: <String>['power', 'age', 'value'],
+      where: 'player_id = ?',
+      whereArgs: <Object?>[playerId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+    final int power = (rows.first['power'] as int?) ?? previousPower;
+    final int age = (rows.first['age'] as int?) ?? 25;
+    final int currentValue = (rows.first['value'] as int?) ?? 0;
+    final int newValue = valueAfterOverallChange(
+      currentValue: currentValue,
+      previousPower: previousPower,
+      newPower: power,
+      age: age,
+    );
+    if (newValue == currentValue) return;
+    await ex.update(
+      t.players,
+      <String, Object?>{'value': newValue},
+      where: 'player_id = ?',
+      whereArgs: <Object?>[playerId],
+    );
+  }
+
   /// Active squad members of a team, first team first, strongest first.
   Future<List<Player>> squadForTeam(int teamId) async {
     final rows = await db.rawQuery(
@@ -401,6 +482,8 @@ class SquadRepository {
         'value': player.value,
         'date': _todayIso(),
       });
+      await refreshTeamPower(buyerTeamId, txn);
+      await refreshTeamPower(sellerTeamId, txn);
       return null;
     });
     return error;
@@ -996,7 +1079,7 @@ class SquadRepository {
     if (focus.isFitness) {
       selected = await db.rawQuery(
         '''
-        SELECT p.player_id, p.name FROM players p
+        SELECT p.player_id, p.name, p.power AS previous_power FROM players p
         JOIN team_players tp ON tp.player_id = p.player_id
         WHERE tp.team_id = ? AND p.status_id = ? AND p.fitness < 100
       ''',
@@ -1005,7 +1088,7 @@ class SquadRepository {
     } else {
       selected = await db.rawQuery(
         '''
-        SELECT p.player_id, p.name FROM players p
+        SELECT p.player_id, p.name, p.power AS previous_power FROM players p
         JOIN team_players tp ON tp.player_id = p.player_id
         WHERE tp.team_id = ? AND p.status_id = ?
           AND p.position_id IN (${focus.positionIds.join(',')})
@@ -1052,6 +1135,17 @@ class SquadRepository {
         'last_match_count': state.matchesPlayed,
         'sessions': state.sessions + 1,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
+      if (!focus.isFitness) {
+        await refreshTeamPower(teamId, txn);
+        // Update MV of each player that just improved.
+        for (final Map<String, Object?> player in selected) {
+          await refreshPlayerValue(
+            player['player_id'] as int,
+            previousPower: (player['previous_power'] as int?) ?? 0,
+            txn: txn,
+          );
+        }
+      }
     });
     return TrainingOutcome(
       improved: <String>[

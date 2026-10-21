@@ -556,7 +556,8 @@ class CareerService {
     return scheduled > 0;
   }
 
-  /// Wednesday after the latest fixture of a cup.
+  /// Safe weekday (Tuesdays or Wednesdays) after the latest fixture of a cup,
+  /// avoiding conflict with other competitions in the same week.
   Future<DateTime> _nextCupDate(int seasonId, int tournamentId) async {
     final List<Map<String, Object?>> lastDateRows = await db.rawQuery(
       '''
@@ -580,16 +581,36 @@ class CareerService {
         : (seasonRows.first['start_year'] as int? ?? 2025);
     final DateTime base =
         DateTime.tryParse(lastDate ?? '') ?? DateTime(startYear, 8, 9);
-    return _nextWednesday(base.add(const Duration(days: 8)));
+
+    final List<Map<String, Object?>> allDates = await db.rawQuery(
+      '''
+      SELECT DISTINCT date FROM matches
+      WHERE season_id = ? AND date IS NOT NULL
+    ''',
+      <Object?>[seasonId],
+    );
+    final Set<String> existingDates = <String>{
+      for (final Map<String, Object?> r in allDates)
+        if (r['date'] is String) r['date'] as String,
+    };
+
+    DateTime candidate = base.add(const Duration(days: 8));
+    while (true) {
+      if (candidate.weekday == DateTime.tuesday ||
+          candidate.weekday == DateTime.wednesday) {
+        final String iso = _isoDate(candidate);
+        if (!existingDates.contains(iso)) {
+          return candidate;
+        }
+      }
+      candidate = candidate.add(const Duration(days: 1));
+    }
   }
 
-  DateTime _nextWednesday(DateTime from) {
-    DateTime d = from;
-    while (d.weekday != DateTime.wednesday) {
-      d = d.add(const Duration(days: 1));
-    }
-    return d;
-  }
+  String _isoDate(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
 
   // ------------------------------------------------------------- season end
 
@@ -681,6 +702,12 @@ class CareerService {
 
     onProgress('Ageing squads...');
     await _ageAndRetire();
+
+    onProgress('Updating player values & contracts...');
+    await _evaluateSeasonPerformanceAndWages(
+      seasonId: current.seasonId,
+      userTeamId: userTeamId,
+    );
 
     onProgress('Archiving season stats...');
     for (final Tournament tour in tournaments) {
@@ -852,5 +879,101 @@ class CareerService {
              SELECT player_id FROM players WHERE status_id = ?)''',
       <Object?>[t.statusRetired],
     );
+  }
+
+  /// Evaluates player performance from the finished season:
+  /// 1. Good performance raises overall power and market value (MV).
+  /// 2. Key/standout performers from the user club request a wage increase.
+  Future<void> _evaluateSeasonPerformanceAndWages({
+    required int seasonId,
+    required int userTeamId,
+  }) async {
+    final List<Map<String, Object?>> rows = await db.rawQuery(
+      '''
+      SELECT p.player_id, p.name, p.power, p.potential, p.age, p.salary, p.value,
+             tp.team_id,
+             COUNT(mp.match_id) AS apps,
+             COALESCE(SUM(mp.goals), 0) AS goals,
+             COALESCE(SUM(mp.assists), 0) AS assists,
+             COALESCE(AVG(mp.rating), 0) / 10.0 AS avg_rating
+      FROM players p
+      JOIN team_players tp ON tp.player_id = p.player_id
+      JOIN match_players mp ON mp.player_id = p.player_id
+      JOIN matches m ON m.match_id = mp.match_id
+      WHERE m.season_id = ? AND m.status = ? AND p.status_id = ?
+        AND mp.minutes > 0
+      GROUP BY p.player_id
+    ''',
+      <Object?>[seasonId, t.matchFinished, t.statusActive],
+    );
+
+    for (final Map<String, Object?> r in rows) {
+      final int playerId = r['player_id'] as int;
+      final int power = (r['power'] as int?) ?? 50;
+      final int potential = (r['potential'] as int?) ?? power;
+      final int age = (r['age'] as int?) ?? 25;
+      final int apps = (r['apps'] as int?) ?? 0;
+      final int goals = (r['goals'] as int?) ?? 0;
+      final int assists = (r['assists'] as int?) ?? 0;
+      final double avgRating = ((r['avg_rating'] as num?) ?? 0).toDouble();
+      final int teamId = (r['team_id'] as int?) ?? 0;
+      final int currentSalary = (r['salary'] as int?) ?? 1000;
+      final int currentValue = (r['value'] as int?) ?? 0;
+
+      // Determine power boost from strong season stats:
+      // Minimum 8 apps to establish consistency.
+      int powerGain = 0;
+      if (apps >= 8 && (avgRating >= 7.0 || (goals + assists) >= 10)) {
+        if (power < potential) {
+          powerGain = avgRating >= 7.5 ? 2 : 1;
+        } else if (age <= 25) {
+          // Young breakout stars can nudge past initial potential
+          powerGain = 1;
+        }
+      }
+
+      final int newPower = (power + powerGain).clamp(40, 99);
+      final int newPotential = max(potential, newPower);
+      final int newMv = SquadRepository.valueAfterOverallChange(
+        currentValue: currentValue,
+        previousPower: power,
+        newPower: newPower,
+        age: age,
+      );
+
+      await db.update(
+        t.players,
+        <String, Object?>{
+          'power': newPower,
+          'potential': newPotential,
+          'value': newMv,
+        },
+        where: 'player_id = ?',
+        whereArgs: <Object?>[playerId],
+      );
+
+      // If user's player had an outstanding season, request wage raise
+      if (teamId == userTeamId && apps >= 10 && avgRating >= 7.0) {
+        final int demandSalary = max(
+          (currentSalary * 1.25).round(),
+          currentSalary + 500,
+        );
+        final String playerName = r['name'] as String? ?? 'Player';
+        await _messages.insert(
+          title: 'Wage Increase Request: $playerName',
+          body:
+              '$playerName had an excellent season ($apps apps, $goals goals, '
+              '$assists assists, avg rating ${avgRating.toStringAsFixed(1)}). '
+              'His agent is requesting a wage increase to ${_money(demandSalary)}/season '
+              'for the upcoming campaign.',
+          teamId: userTeamId,
+          playerId: playerId,
+          sender: 'Player Representative',
+        );
+      }
+    }
+
+    // Refresh user team overall power after player progression
+    await _squads.refreshTeamPower(userTeamId);
   }
 }
