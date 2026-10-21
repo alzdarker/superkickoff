@@ -182,7 +182,9 @@ class InboxTab extends StatelessWidget {
                 ),
               );
             },
-            child: Text('Accept Loan (${money(offer.offerAmount)})'),
+            child: Text(
+              'Accept Loan · ${offer.loanSeasons}y (${money(offer.offerAmount)})',
+            ),
           ),
         ];
       }

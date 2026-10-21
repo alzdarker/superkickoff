@@ -70,6 +70,9 @@ class CareerProvider extends ChangeNotifier {
   /// results screen can show every game played on that date.
   List<FixtureMatch> lastMatchday = <FixtureMatch>[];
   Map<int, Team> lastMatchdayTeams = <int, Team>{};
+
+  /// Aggregate (home, away) of finished leg-2 cup ties in [lastMatchday].
+  Map<int, (int, int)> lastMatchdayAggregates = <int, (int, int)>{};
   List<StandingRow> standings = <StandingRow>[];
 
   /// Group tables of continental cups, keyed by tournament id.
@@ -96,8 +99,8 @@ class CareerProvider extends ChangeNotifier {
 
   // ------------------------------------------------------------ bootstrap
 
-  Future<void> init() async {
-    _db = await AppDatabase.open();
+  Future<void> init([Database? database]) async {
+    _db = database ?? await AppDatabase.open();
     _refs = ReferenceRepository(_db);
     _seasons = SeasonRepository(_db);
     _squads = SquadRepository(_db);
@@ -381,6 +384,8 @@ class CareerProvider extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    await _service.repairSelfMatches(season!.seasonId);
+    await _service.resolveFixtureClashes(season!.seasonId);
     upcoming = await _service.upcomingMatches(season!.seasonId);
     nextDate = await _service.nextMatchDate(season!.seasonId);
     matchesToday = nextDate == null
@@ -469,11 +474,151 @@ class CareerProvider extends ChangeNotifier {
       mine,
       recordEvents: true,
     );
+
+    final bool isLeague = mine.tournamentId == league?.tournamentId;
+    bool isCupFinal = false;
+    bool isLeagueDecider = false;
+    String? trophyName;
+    bool leagueTitleWon = false;
+
+    if (!isLeague && mine.tournamentId != 9999) {
+      if (mine.groupId == null) {
+        final int tiesInPhase =
+            Sqflite.firstIntValue(
+              await _db.rawQuery(
+                'SELECT COUNT(*) FROM matches WHERE season_id = ? AND tournament_id = ? AND phase = ? AND group_id IS NULL',
+                <Object?>[season!.seasonId, mine.tournamentId, mine.phase],
+              ),
+            ) ??
+            0;
+        if (tiesInPhase == 1) {
+          isCupFinal = true;
+          trophyName = competitionLabel(mine);
+        }
+      }
+    } else if (isLeague && league != null) {
+      final int maxRound =
+          Sqflite.firstIntValue(
+            await _db.rawQuery(
+              'SELECT MAX(round) FROM matches WHERE season_id = ? AND tournament_id = ?',
+              <Object?>[season!.seasonId, league!.tournamentId],
+            ),
+          ) ??
+          0;
+      final int userRank = standings.indexWhere(
+        (StandingRow r) => r.teamId == userTeamId,
+      );
+
+      // A title decider only exists if the title has NOT already been won before this match.
+      bool leagueAlreadyDecided = false;
+      if (standings.isNotEmpty) {
+        final StandingRow prevFirst = standings.first;
+        final StandingRow? prevSecond =
+            standings.length > 1 ? standings[1] : null;
+        final int secondPlayed = prevSecond?.played ?? prevFirst.played;
+        final int remainingForSecond = maxRound - secondPlayed;
+        final int maxSecondBefore =
+            (prevSecond?.points ?? 0) + (remainingForSecond * 3);
+        if (prevFirst.points > maxSecondBefore ||
+            (maxRound > 0 && prevFirst.played >= maxRound)) {
+          leagueAlreadyDecided = true;
+        }
+      }
+
+      if (!leagueAlreadyDecided && userRank >= 0 && userRank <= 1) {
+        final StandingRow currentFirst = standings.first;
+        final StandingRow? currentSecond =
+            standings.length > 1 ? standings[1] : null;
+        final int remainingBefore = maxRound - currentFirst.played;
+        final int maxSecondPossible =
+            (currentSecond?.points ?? 0) + (remainingBefore * 3);
+
+        final bool canClinch = userRank == 0 &&
+            (currentFirst.points + 3 > maxSecondPossible ||
+                (maxRound > 0 && mine.round >= maxRound - 2));
+        final bool finalRounds = maxRound > 0 && mine.round >= maxRound - 1;
+
+        if (canClinch || finalRounds) {
+          isLeagueDecider = true;
+          trophyName = league!.name;
+        }
+
+        final List<StandingRow> updated = await _seasons.standings(
+          season!.seasonId,
+          league!.tournamentId,
+        );
+        if (updated.isNotEmpty && updated.first.teamId == userTeamId) {
+          final StandingRow first = updated.first;
+          final StandingRow? second = updated.length > 1 ? updated[1] : null;
+          final int remainingRounds = maxRound - first.played;
+          final int maxSecondPoints =
+              (second?.points ?? 0) + (remainingRounds * 3);
+          if (first.points > maxSecondPoints ||
+              (maxRound > 0 && first.played >= maxRound)) {
+            isLeagueDecider = true;
+            leagueTitleWon = true;
+            trophyName = league!.name;
+          }
+        }
+      }
+    }
+
+    FixtureMatch? leg1Match;
+    bool hasLeg2 = false;
+    // League rounds also use leg 2 (mirror fixtures); only cup ties aggregate.
+    if (mine.groupId == null && !isLeague && mine.tournamentId != 9999) {
+      if (mine.leg == 2) {
+        final List<Map<String, Object?>> leg1Rows = await _db.query(
+          t.matches,
+          where:
+              'season_id = ? AND tournament_id = ? AND phase = ? AND leg = 1 '
+              'AND home_team_id = ? AND away_team_id = ?',
+          whereArgs: <Object?>[
+            season!.seasonId,
+            mine.tournamentId,
+            mine.phase,
+            mine.awayTeamId,
+            mine.homeTeamId,
+          ],
+          limit: 1,
+        );
+        if (leg1Rows.isNotEmpty) {
+          leg1Match = FixtureMatch.fromMap(leg1Rows.first);
+        }
+      } else if (mine.leg == 1) {
+        final int leg2Count =
+            Sqflite.firstIntValue(
+              await _db.rawQuery(
+                '''
+          SELECT COUNT(*) FROM matches
+          WHERE season_id = ? AND tournament_id = ? AND phase = ? AND leg = 2
+            AND home_team_id = ? AND away_team_id = ?
+          ''',
+                <Object?>[
+                  season!.seasonId,
+                  mine.tournamentId,
+                  mine.phase,
+                  mine.awayTeamId,
+                  mine.homeTeamId,
+                ],
+              ),
+            ) ??
+            0;
+        hasLeg2 = leg2Count > 0;
+      }
+    }
+
     liveSession = LiveMatchSession(
       match: mine,
       result: result,
       homeTeam: teamCache[mine.homeTeamId]!,
       awayTeam: teamCache[mine.awayTeamId]!,
+      isCupFinal: isCupFinal,
+      isLeagueDecider: isLeagueDecider,
+      trophyName: trophyName,
+      leagueTitleWon: leagueTitleWon,
+      leg1Match: leg1Match,
+      hasLeg2: hasLeg2,
     );
     notifyListeners();
   }
@@ -563,6 +708,33 @@ class CareerProvider extends ChangeNotifier {
     );
     lastMatchday = played.where((FixtureMatch m) => m.isPlayed).toList();
     lastMatchdayTeams = Map<int, Team>.of(teamCache);
+    lastMatchdayAggregates = <int, (int, int)>{};
+    for (final FixtureMatch m in lastMatchday) {
+      // League rounds also use leg 2 (mirror fixtures); only cup ties aggregate.
+      if (m.leg != 2 || m.groupId != null || !cups.any((Tournament c) => c.tournamentId == m.tournamentId)) {
+        continue;
+      }
+      final List<Map<String, Object?>> rows = await _db.query(
+        t.matches,
+        where: 'season_id = ? AND tournament_id = ? AND phase = ? AND leg = 1 '
+            'AND home_team_id = ? AND away_team_id = ? AND status = ?',
+        whereArgs: <Object?>[
+          seasonId,
+          m.tournamentId,
+          m.phase,
+          m.awayTeamId,
+          m.homeTeamId,
+          t.matchFinished,
+        ],
+        limit: 1,
+      );
+      if (rows.isEmpty) continue;
+      final FixtureMatch leg1 = FixtureMatch.fromMap(rows.first);
+      lastMatchdayAggregates[m.matchId] = (
+        (m.homeGoals ?? 0) + (leg1.awayGoals ?? 0),
+        (m.awayGoals ?? 0) + (leg1.homeGoals ?? 0),
+      );
+    }
   }
 
   Future<void> _tickAfterMatchday() async {
@@ -1129,7 +1301,8 @@ class CareerProvider extends ChangeNotifier {
 
     await _messages.insert(
       title: 'Loan deal completed',
-      body: '${offer.playerName} joined ${offer.toTeamName} on loan until the end of the season. '
+      body: '${offer.playerName} joined ${offer.toTeamName} on loan for '
+          '${offer.loanSeasons == 1 ? '1 season' : '2 seasons'}. '
           'Your club received a loan fee of ${fmt.money(offer.offerAmount)}.',
       teamId: userTeamId,
       sender: 'Transfer Desk',
@@ -1327,12 +1500,33 @@ class LiveMatchSession {
     required this.result,
     required this.homeTeam,
     required this.awayTeam,
+    this.isCupFinal = false,
+    this.isLeagueDecider = false,
+    this.trophyName,
+    this.leagueTitleWon = false,
+    this.leg1Match,
+    this.hasLeg2 = false,
   });
 
   final FixtureMatch match;
   final MatchResult result;
   final Team homeTeam;
   final Team awayTeam;
+  final bool isCupFinal;
+  final bool isLeagueDecider;
+  final String? trophyName;
+  final bool leagueTitleWon;
+  final FixtureMatch? leg1Match;
+  final bool hasLeg2;
+
+  bool get isHighStakes => isCupFinal || isLeagueDecider;
+  bool get isTwoLeggedTie => leg1Match != null || hasLeg2;
+  bool get isLeg2 => match.leg == 2 && leg1Match != null;
+  bool get isLeg1 => match.leg == 1 && hasLeg2;
+
+  /// In Leg 1, current home team played away, and current away team played at home.
+  int get leg1HomeGoals => leg1Match?.awayGoals ?? 0;
+  int get leg1AwayGoals => leg1Match?.homeGoals ?? 0;
 
   /// Shootout kicks once a knockout tie ended level after 90 minutes.
   List<MatchEvent> get shootoutEvents => result.events
@@ -1340,4 +1534,31 @@ class LiveMatchSession {
       .toList();
 
   bool get decidedOnPenalties => shootoutEvents.isNotEmpty;
+
+  int? get winnerId {
+    if (result.homeGoals > result.awayGoals) return homeTeam.teamId;
+    if (result.awayGoals > result.homeGoals) return awayTeam.teamId;
+    if (decidedOnPenalties) {
+      final int homePen = shootoutEvents
+          .where((MatchEvent e) => e.isHome && e.detail?.startsWith('scored') == true)
+          .length;
+      final int awayPen = shootoutEvents
+          .where((MatchEvent e) => !e.isHome && e.detail?.startsWith('scored') == true)
+          .length;
+      if (homePen > awayPen) return homeTeam.teamId;
+      if (awayPen > homePen) return awayTeam.teamId;
+    }
+    return null;
+  }
+
+  bool isUserChampion(int userTeamId) {
+    if (isCupFinal && winnerId == userTeamId) return true;
+    if (isLeagueDecider && leagueTitleWon) return true;
+    return false;
+  }
+
+  bool isUserRunnerUp(int userTeamId) {
+    if (isCupFinal && winnerId != null && winnerId != userTeamId) return true;
+    return false;
+  }
 }

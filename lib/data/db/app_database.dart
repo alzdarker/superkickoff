@@ -144,7 +144,8 @@ class AppDatabase {
         created_date TEXT NOT NULL,
         updated_date TEXT,
         message_id INTEGER,
-        is_loan INTEGER NOT NULL DEFAULT 0
+        is_loan INTEGER NOT NULL DEFAULT 0,
+        loan_seasons INTEGER NOT NULL DEFAULT 1
       )
     ''');
     await db.execute('''
@@ -278,6 +279,13 @@ class AppDatabase {
     )) {
       await db.execute(
         'ALTER TABLE ${t.transferOffers} ADD COLUMN is_loan INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+    if (!offerColumns.any(
+      (Map<String, Object?> column) => column['name'] == 'loan_seasons',
+    )) {
+      await db.execute(
+        'ALTER TABLE ${t.transferOffers} ADD COLUMN loan_seasons INTEGER NOT NULL DEFAULT 1',
       );
     }
     final List<Map<String, Object?>> trainingColumns = await db.rawQuery(

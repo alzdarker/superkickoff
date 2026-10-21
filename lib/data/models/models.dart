@@ -252,10 +252,13 @@ class FixtureMatch {
     this.groupId,
     this.penaltyHomeGoals,
     this.penaltyAwayGoals,
+    this.leg = 1,
+    this.seasonId = 0,
   });
 
   final int matchId;
   final int tournamentId;
+  final int seasonId;
   final int round;
   final int phase;
 
@@ -274,17 +277,22 @@ class FixtureMatch {
   final int? penaltyHomeGoals;
   final int? penaltyAwayGoals;
 
+  /// Leg of the tie (1 or 2). Defaults to 1 for single-leg matches.
+  final int leg;
+
   bool get isPlayed => status == DbMatch.matchFinished;
   bool get isScheduled => status == DbMatch.matchScheduled;
 
   factory FixtureMatch.fromMap(Map<String, Object?> m) => FixtureMatch(
     matchId: m['match_id'] as int,
     tournamentId: m['tournament_id'] as int,
+    seasonId: (m['season_id'] as int?) ?? 0,
     round: (m['round'] as int?) ?? 0,
     phase: (m['phase'] as int?) ?? 0,
     groupId: m['group_id'] as int?,
     penaltyHomeGoals: (m['penalty_home_goals'] as int?) ?? 0,
     penaltyAwayGoals: (m['penalty_away_goals'] as int?) ?? 0,
+    leg: (m['leg'] as int?) ?? 1,
     status: (m['status'] as int?) ?? 1,
     homeTeamId: m['home_team_id'] as int,
     awayTeamId: m['away_team_id'] as int,
@@ -293,6 +301,62 @@ class FixtureMatch {
     homeGoals: m['home_goals'] as int?,
     awayGoals: m['away_goals'] as int?,
     winnerId: m['winner_id'] as int?,
+  );
+}
+
+/// One knockout tie: a single match, or leg 1 + leg 2 of a two-legged tie.
+class KnockoutTie {
+  KnockoutTie(this.first, [this.second]);
+
+  final FixtureMatch first;
+  final FixtureMatch? second;
+
+  bool get twoLegged => second != null;
+  bool get complete => first.isPlayed && (second?.isPlayed ?? true);
+
+  /// Aggregate from the point of view of leg 1's home / away club.
+  int get homeAgg => (first.homeGoals ?? 0) + (second?.awayGoals ?? 0);
+  int get awayAgg => (first.awayGoals ?? 0) + (second?.homeGoals ?? 0);
+
+  /// Club that went through, once every leg is played.
+  int? get winnerId => complete ? (second ?? first).winnerId : null;
+
+  /// Aggregate oriented to [m]'s home / away club (leg 2 flips the venues).
+  (int, int) aggregateFor(FixtureMatch m) =>
+      m.matchId == first.matchId ? (homeAgg, awayAgg) : (awayAgg, homeAgg);
+
+  /// Shootout of the deciding leg oriented to leg 1 home - leg 1 away, or null.
+  (int, int)? get penalties {
+    final FixtureMatch last = second ?? first;
+    final int home = last.penaltyHomeGoals ?? 0;
+    final int away = last.penaltyAwayGoals ?? 0;
+    if (home == 0 && away == 0) return null;
+    return second == null ? (home, away) : (away, home);
+  }
+}
+
+/// Pairs the legs of knockout [matches] into ties. Pass knockout matches only:
+/// league rounds also use leg 2 for their second half-season.
+List<KnockoutTie> groupTies(List<FixtureMatch> matches) {
+  final Map<String, FixtureMatch> open = <String, FixtureMatch>{};
+  final List<KnockoutTie> ties = <KnockoutTie>[];
+  for (final FixtureMatch m in matches) {
+    final List<int> ids = <int>[m.homeTeamId, m.awayTeamId]..sort();
+    final String key = '${m.tournamentId}:${m.phase}:${ids.join('-')}';
+    final FixtureMatch? other = open[key];
+    if (other != null && other.leg != m.leg) {
+      open.remove(key);
+      ties.add(
+        other.leg < m.leg ? KnockoutTie(other, m) : KnockoutTie(m, other),
+      );
+    } else {
+      open[key] = m;
+    }
+  }
+  ties.addAll(open.values.map(KnockoutTie.new));
+  return ties..sort(
+    (KnockoutTie a, KnockoutTie b) =>
+        a.first.matchId.compareTo(b.first.matchId),
   );
 }
 
@@ -838,6 +902,7 @@ class TransferOffer {
     this.updatedDate,
     this.messageId,
     this.isLoan = false,
+    this.loanSeasons = 1,
   });
 
   final int offerId;
@@ -859,6 +924,9 @@ class TransferOffer {
   final int? messageId;
   final bool isLoan;
 
+  /// Seasons the borrower keeps the player (1 or 2); loans only.
+  final int loanSeasons;
+
   factory TransferOffer.fromMap(Map<String, Object?> m) => TransferOffer(
     offerId: m['offer_id'] as int,
     playerId: m['player_id'] as int,
@@ -878,6 +946,7 @@ class TransferOffer {
     updatedDate: m['updated_date'] as String?,
     messageId: m['message_id'] as int?,
     isLoan: (m['is_loan'] as int? ?? 0) == 1,
+    loanSeasons: (m['loan_seasons'] as int?) ?? 1,
   );
 }
 
@@ -972,7 +1041,8 @@ class ClubSponsorship {
     type: (m['type'] as int?) ?? 1,
     teamId: (m['team_id'] as int?) ?? 0,
     sponsorId: (m['sponsor_id'] as int?) ?? 1,
-    sponsorName: (m['sponsor_name'] as String?) ??
+    sponsorName:
+        (m['sponsor_name'] as String?) ??
         (m['extra_data'] as String?) ??
         'Sponsor',
     seasonId: (m['season_id'] as int?) ?? 0,

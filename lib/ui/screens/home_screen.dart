@@ -156,9 +156,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _openInbox(BuildContext context) => Navigator.of(context).push(
-    MaterialPageRoute<void>(builder: (_) => const InboxScreen()),
-  );
+  void _openInbox(BuildContext context) =>
+      Navigator.of(context)
+          .push(MaterialPageRoute<void>(builder: (_) => const InboxScreen()));
 
   Future<void> _openBrackets(BuildContext context, CareerProvider game) async {
     final Tournament? tournament = await showModalBottomSheet<Tournament>(
@@ -261,6 +261,7 @@ class _HomeScreenState extends State<HomeScreen> {
         teams: game.lastMatchdayTeams,
         userTeamId: game.userTeamId,
         competitionLabel: game.competitionLabel,
+        aggregates: game.lastMatchdayAggregates,
         date: game.lastMatchday.isEmpty ? null : game.lastMatchday.first.date,
       );
     }
@@ -434,6 +435,7 @@ class OverviewTab extends StatelessWidget {
                             teams: provider.lastMatchdayTeams,
                             userTeamId: provider.userTeamId,
                             competitionLabel: provider.competitionLabel,
+                            aggregates: provider.lastMatchdayAggregates,
                             date: provider.lastMatchday.isEmpty
                                 ? null
                                 : provider.lastMatchday.first.date,

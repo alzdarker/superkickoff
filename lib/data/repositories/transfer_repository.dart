@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:sqflite/sqflite.dart';
 
 import '../db/schema.dart' as t;
@@ -17,6 +19,7 @@ class TransferRepository {
     required int offerAmount,
     required int playerValue,
     bool isLoan = false,
+    int loanSeasons = 1,
   }) async {
     return await db.insert(t.transferOffers, <String, Object?>{
       'player_id': playerId,
@@ -26,6 +29,7 @@ class TransferRepository {
       'player_value': playerValue,
       'status': t.offerPending,
       'is_loan': isLoan ? 1 : 0,
+      'loan_seasons': loanSeasons,
       'created_date': _todayIso(),
     });
   }
@@ -237,6 +241,7 @@ class TransferRepository {
           whereArgs: <Object?>[teamId],
         );
       }
+
       await updatePower(offer.toTeamId);
       await updatePower(offer.fromTeamId);
 
@@ -256,6 +261,29 @@ class TransferRepository {
     return error;
   }
 
+  /// Calendar year the loan ends (June 30th). A loan agreed once the season is
+  /// under way still runs [seasons] *full* seasons, so it outlasts this one.
+  static Future<int> loanEndYear(DatabaseExecutor db, int seasons) async {
+    final List<Map<String, Object?>> rows = await db.query(
+      t.seasons,
+      orderBy: 'season_id DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) return DateTime.now().year + seasons;
+    final int seasonId = rows.first['season_id'] as int;
+    final int endYear = (rows.first['end_year'] as int?) ?? DateTime.now().year;
+    final int started =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM matches WHERE season_id = ? '
+            'AND tournament_id != 9999 AND status = ?',
+            <Object?>[seasonId, t.matchFinished],
+          ),
+        ) ??
+        0;
+    return endYear + seasons - (started == 0 ? 1 : 0);
+  }
+
   /// Complete a loan deal (moves player on loan, transfers loan fee).
   Future<String?> completeLoan(int offerId) async {
     final TransferOffer? offer = await getOffer(offerId);
@@ -269,9 +297,16 @@ class TransferRepository {
         limit: 1,
       );
       if (borrowerRows.isEmpty) return 'Borrowing team not found';
-      final int borrowerBudget =
-          (borrowerRows.first['budget'] as int?) ?? 0;
-      if (borrowerBudget < offer.offerAmount) return 'Not enough budget';
+      final int borrowerBudget = (borrowerRows.first['budget'] as int?) ?? 0;
+      final int owned =
+          Sqflite.firstIntValue(
+            await txn.rawQuery(
+              'SELECT COUNT(*) FROM team_players WHERE player_id = ? AND team_id = ?',
+              <Object?>[offer.playerId, offer.fromTeamId],
+            ),
+          ) ??
+          0;
+      if (owned == 0) return '${offer.playerName} is no longer at your club.';
 
       final List<Map<String, Object?>> lenderRows = await txn.query(
         t.teams,
@@ -306,7 +341,10 @@ class TransferRepository {
       // Transfer loan fee
       await txn.update(
         t.teams,
-        <String, Object?>{'budget': borrowerBudget - offer.offerAmount},
+        <String, Object?>{
+          // AI clubs never block a loan the manager already agreed to.
+          'budget': max(0, borrowerBudget - offer.offerAmount),
+        },
         where: 'team_id = ?',
         whereArgs: <Object?>[offer.toTeamId],
       );
@@ -318,14 +356,14 @@ class TransferRepository {
       );
 
       // Record in team_loans
-      final int year = DateTime.now().year;
+      final int endYear = await loanEndYear(txn, offer.loanSeasons);
       await txn.insert(t.teamLoans, <String, Object?>{
         'player_id': offer.playerId,
         'from_team_id': offer.fromTeamId,
         'to_team_id': offer.toTeamId,
         'date_from': _todayIso(),
-        'date_to': '${year + 1}-06-30',
-        'months': 12,
+        'date_to': '$endYear-06-30',
+        'months': 12 * offer.loanSeasons,
         'notified': 0,
       });
 

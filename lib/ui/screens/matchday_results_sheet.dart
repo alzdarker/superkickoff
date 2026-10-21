@@ -11,6 +11,7 @@ Future<void> showMatchdayResults(
   required Map<int, Team> teams,
   required int userTeamId,
   required String Function(FixtureMatch) competitionLabel,
+  Map<int, (int, int)> aggregates = const <int, (int, int)>{},
   String? date,
 }) {
   if (matches.isEmpty) return Future<void>.value();
@@ -34,6 +35,7 @@ Future<void> showMatchdayResults(
         teams: teams,
         userTeamId: userTeamId,
         competitionLabel: competitionLabel,
+        aggregates: aggregates,
         date: date,
       ),
     ),
@@ -46,6 +48,7 @@ class _MatchdayResultsSheet extends StatelessWidget {
     required this.teams,
     required this.userTeamId,
     required this.competitionLabel,
+    required this.aggregates,
     required this.date,
   });
 
@@ -53,6 +56,7 @@ class _MatchdayResultsSheet extends StatelessWidget {
   final Map<int, Team> teams;
   final int userTeamId;
   final String Function(FixtureMatch) competitionLabel;
+  final Map<int, (int, int)> aggregates;
   final String? date;
 
   @override
@@ -152,14 +156,29 @@ class _MatchdayResultsSheet extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(
-            competitionLabel(match).toUpperCase(),
-            style: const TextStyle(
-              fontSize: 9,
-              letterSpacing: .6,
-              color: AppTheme.textDim,
-              fontWeight: FontWeight.bold,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: <Widget>[
+              Text(
+                competitionLabel(match).toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 9,
+                  letterSpacing: .6,
+                  color: AppTheme.textDim,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              if (aggregates.containsKey(match.matchId))
+                Text(
+                  'LEG 2',
+                  style: const TextStyle(
+                    fontSize: 8,
+                    letterSpacing: .5,
+                    color: AppTheme.accent,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 3),
           Row(
@@ -189,6 +208,15 @@ class _MatchdayResultsSheet extends StatelessWidget {
                         fontSize: 14,
                       ),
                     ),
+                    if (aggregates[match.matchId] case (int h, int a))
+                      Text(
+                        'Agg $h-$a',
+                        style: const TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.accent,
+                        ),
+                      ),
                     if ((match.penaltyHomeGoals ?? 0) > 0 ||
                         (match.penaltyAwayGoals ?? 0) > 0)
                       Text(

@@ -213,17 +213,103 @@ class CareerService {
     int? penaltyHome;
     int? penaltyAway;
     List<MatchEvent> events = result.events;
-    // Knockout ties cannot end level: decide them with a shootout.
-    if (winnerId == null && await _isKnockout(match)) {
-      final MatchPenaltyShootout shootout = _engine.penaltyShootout(
-        result.input,
-      );
-      penaltyHome = shootout.homeScore;
-      penaltyAway = shootout.awayScore;
-      winnerId = shootout.homeScore > shootout.awayScore
-          ? match.homeTeamId
-          : match.awayTeamId;
-      events = <MatchEvent>[...result.events, ...shootout.events];
+
+    // Check knockout rules and 2-legged ties:
+    if (await _isKnockout(match)) {
+      if (match.leg == 1) {
+        final bool hasLeg2 =
+            (Sqflite.firstIntValue(
+                  await db.rawQuery(
+                    '''
+          SELECT COUNT(*) FROM matches
+          WHERE season_id = ? AND tournament_id = ? AND phase = ? AND leg = 2
+            AND home_team_id = ? AND away_team_id = ?
+        ''',
+                    <Object?>[
+                      match.seasonId,
+                      match.tournamentId,
+                      match.phase,
+                      match.awayTeamId,
+                      match.homeTeamId,
+                    ],
+                  ),
+                ) ??
+                0) >
+            0;
+
+        if (!hasLeg2 && winnerId == null) {
+          // Single-leg tie ended level -> shootout.
+          final MatchPenaltyShootout shootout = _engine.penaltyShootout(
+            result.input,
+          );
+          penaltyHome = shootout.homeScore;
+          penaltyAway = shootout.awayScore;
+          winnerId = shootout.homeScore > shootout.awayScore
+              ? match.homeTeamId
+              : match.awayTeamId;
+          events = <MatchEvent>[...result.events, ...shootout.events];
+        }
+        // In Leg 1 of a 2-leg tie, draws stand without a shootout.
+      } else if (match.leg == 2) {
+        // Leg 2 of a 2-legged tie: evaluate aggregate score.
+        final List<Map<String, Object?>> leg1Rows = await db.query(
+          t.matches,
+          where:
+              'season_id = ? AND tournament_id = ? AND phase = ? AND leg = 1 '
+              'AND home_team_id = ? AND away_team_id = ?',
+          whereArgs: <Object?>[
+            match.seasonId,
+            match.tournamentId,
+            match.phase,
+            match.awayTeamId,
+            match.homeTeamId,
+          ],
+          limit: 1,
+        );
+        if (leg1Rows.isNotEmpty) {
+          final int leg1Away = (leg1Rows.first['away_goals'] as int?) ?? 0;
+          final int leg1Home = (leg1Rows.first['home_goals'] as int?) ?? 0;
+          final int homeAgg = result.homeGoals + leg1Away;
+          final int awayAgg = result.awayGoals + leg1Home;
+
+          if (homeAgg > awayAgg) {
+            winnerId = match.homeTeamId;
+          } else if (awayAgg > homeAgg) {
+            winnerId = match.awayTeamId;
+          } else {
+            // Aggregate score is level: shootout in Leg 2 decides the tie.
+            final MatchPenaltyShootout shootout = _engine.penaltyShootout(
+              result.input,
+            );
+            penaltyHome = shootout.homeScore;
+            penaltyAway = shootout.awayScore;
+            winnerId = shootout.homeScore > shootout.awayScore
+                ? match.homeTeamId
+                : match.awayTeamId;
+            events = <MatchEvent>[...result.events, ...shootout.events];
+          }
+        } else if (winnerId == null) {
+          final MatchPenaltyShootout shootout = _engine.penaltyShootout(
+            result.input,
+          );
+          penaltyHome = shootout.homeScore;
+          penaltyAway = shootout.awayScore;
+          winnerId = shootout.homeScore > shootout.awayScore
+              ? match.homeTeamId
+              : match.awayTeamId;
+          events = <MatchEvent>[...result.events, ...shootout.events];
+        }
+      } else if (winnerId == null) {
+        final MatchPenaltyShootout shootout = _engine.penaltyShootout(
+          result.input,
+        );
+        penaltyHome = shootout.homeScore;
+        penaltyAway = shootout.awayScore;
+        winnerId = shootout.homeScore > shootout.awayScore
+            ? match.homeTeamId
+            : match.awayTeamId;
+        events = <MatchEvent>[...result.events, ...shootout.events];
+      }
     }
     await _matchRepo.saveResult(
       matchId: match.matchId,
@@ -383,9 +469,7 @@ class CareerService {
     ''',
       <Object?>[seasonId, t.matchFinished],
     );
-    String? date = rows.isEmpty
-        ? null
-        : rows.first['last_date'] as String?;
+    String? date = rows.isEmpty ? null : rows.first['last_date'] as String?;
     if (date == null) {
       final List<Map<String, Object?>> minRows = await db.rawQuery(
         'SELECT MIN(date) AS first_date FROM matches WHERE season_id = ? AND date IS NOT NULL',
@@ -394,15 +478,13 @@ class CareerService {
       date = minRows.isEmpty ? null : minRows.first['first_date'] as String?;
     }
     if (date == null) return;
-    final List<YouthProspect> graduates =
-        await _squads.graduateYouthPlayersIfDue(
-      teamId: userTeamId,
-      date: date,
-    );
+    final List<YouthProspect> graduates = await _squads
+        .graduateYouthPlayersIfDue(teamId: userTeamId, date: date);
     if (graduates.isEmpty) return;
     await _messages.insert(
       title: 'Youth Academy Intake: ${graduates.length} new prospects',
-      body: 'Our youth academy has scouted ${graduates.length} new prospects. '
+      body:
+          'Our youth academy has scouted ${graduates.length} new prospects. '
           'Review their profiles and decide which ones to promote to your squad.',
       teamId: userTeamId,
       sender: 'Youth Academy',
@@ -416,16 +498,20 @@ class CareerService {
   }) async {
     final TransferRepository? transfers = _transfers;
     if (transfers == null) return;
-    final List<Team> candidates = (await _registeredClubs())
-        .where((Team team) => team.teamId != userTeamId)
-        .toList();
-    if (candidates.isEmpty) return;
-
-    final Team borrower = candidates[_rng.nextInt(candidates.length)];
     final int loanFee = max(
       25000,
       (player.value * (0.06 + _rng.nextDouble() * 0.08)).round(),
     );
+    // Only clubs that can actually pay the fee make an offer.
+    final List<Team> candidates = (await _registeredClubs())
+        .where(
+          (Team team) => team.teamId != userTeamId && team.budget >= loanFee,
+        )
+        .toList();
+    if (candidates.isEmpty) return;
+
+    final Team borrower = candidates[_rng.nextInt(candidates.length)];
+    final int loanSeasons = 1 + _rng.nextInt(2);
     final int offerId = await transfers.createOffer(
       playerId: player.playerId,
       fromTeamId: userTeamId,
@@ -433,10 +519,13 @@ class CareerService {
       offerAmount: loanFee,
       playerValue: player.value,
       isLoan: true,
+      loanSeasons: loanSeasons,
     );
     await _messages.insert(
       title: 'Loan offer: ${player.name}',
-      body: '${borrower.name} wants to take ${player.name} on loan for the season. '
+      body:
+          '${borrower.name} wants to take ${player.name} on loan for '
+          '${loanSeasons == 1 ? '1 season' : '2 seasons'}. '
           'They offer a loan fee of ${_money(loanFee)} and will cover his wages.',
       teamId: userTeamId,
       sender: borrower.name,
@@ -455,7 +544,8 @@ class CareerService {
     final List<Team> candidates = (await _registeredClubs())
         .where(
           (Team team) =>
-              team.teamId != userTeamId && team.budget >= (player.value * 0.8).round(),
+              team.teamId != userTeamId &&
+              team.budget >= (player.value * 0.8).round(),
         )
         .toList();
     if (candidates.isEmpty) return;
@@ -473,7 +563,8 @@ class CareerService {
     );
     await _messages.insert(
       title: 'Transfer offer received',
-      body: '${buyer.name} offered ${_money(offerAmount)} for ${player.name}. '
+      body:
+          '${buyer.name} offered ${_money(offerAmount)} for ${player.name}. '
           'Open this message to accept, reject, or make a counter offer.',
       teamId: userTeamId,
       sender: buyer.name,
@@ -607,12 +698,21 @@ class CareerService {
         final int scheduled = await _gen.scheduleCupRound(
           seasonId,
           cupTournamentId,
-          <int>[for (final (int a, int b) in pairs) ...<int>[a, b]],
+          <int>[
+            for (final (int a, int b) in pairs) ...<int>[a, b],
+          ],
           phase: 1,
-          date: await _nextCupDate(seasonId, cupTournamentId),
+          date: await _nextCupDate(
+            seasonId,
+            cupTournamentId,
+            teamIds: <int>[
+              for (final (int a, int b) in pairs) ...<int>[a, b],
+            ],
+          ),
           allTeams: teamCache,
           pairs: pairs,
         );
+        await _gen.resolveFixtureClashes(seasonId);
         return scheduled > 0;
       }
     }
@@ -623,6 +723,12 @@ class CareerService {
       WHERE season_id = ? AND tournament_id = ?
         AND phase = (SELECT MAX(phase) FROM matches
                      WHERE season_id = ? AND tournament_id = ?)
+        AND (leg = 2 OR leg = (
+          SELECT MAX(m2.leg) FROM matches m2
+          WHERE m2.season_id = matches.season_id
+            AND m2.tournament_id = matches.tournament_id
+            AND m2.phase = matches.phase
+        ))
         AND status = ? AND winner_id IS NOT NULL
       ORDER BY match_id ASC
     ''',
@@ -634,10 +740,14 @@ class CareerService {
         t.matchFinished,
       ],
     );
-    final List<int> survivors = <int>[
-      for (final Map<String, Object?> row in rows)
-        if (row['winner_id'] is int) row['winner_id'] as int,
-    ];
+    final List<int> survivors = <int>[];
+    final Set<int> seenWinners = <int>{};
+    for (final Map<String, Object?> row in rows) {
+      final int? wid = row['winner_id'] as int?;
+      if (wid != null && seenWinners.add(wid)) {
+        survivors.add(wid);
+      }
+    }
     if (survivors.length < 2) return false;
     final rowsMax = await db.rawQuery(
       '''
@@ -650,10 +760,16 @@ class CareerService {
         ? null
         : rowsMax.first['max_phase'] as int?;
     if (maxPhase == null) return false;
-    final DateTime date = await _nextCupDate(seasonId, cupTournamentId);
+    final DateTime date = await _nextCupDate(
+      seasonId,
+      cupTournamentId,
+      teamIds: survivors,
+    );
     final List<(int, int)> nextPairs = <(int, int)>[];
     for (int i = 0; i + 1 < survivors.length; i += 2) {
-      nextPairs.add((survivors[i], survivors[i + 1]));
+      if (survivors[i] != survivors[i + 1]) {
+        nextPairs.add((survivors[i], survivors[i + 1]));
+      }
     }
     final int scheduled = await _gen.scheduleCupRound(
       seasonId,
@@ -664,6 +780,7 @@ class CareerService {
       allTeams: teamCache,
       pairs: nextPairs.length * 2 == survivors.length ? nextPairs : null,
     );
+    await _gen.resolveFixtureClashes(seasonId);
     return scheduled > 0;
   }
 
@@ -672,9 +789,17 @@ class CareerService {
   /// cannot meet before the final.
   static List<(int, int)> _pairGroupKnockout(List<GroupTable> groups) {
     final List<(int, int)> pairs = <(int, int)>[];
+    final Set<int> paired = <int>{};
+
+    void tryPair(int a, int b) {
+      if (a != b && paired.add(a) && paired.add(b)) {
+        pairs.add((a, b));
+      }
+    }
+
     if (groups.length < 2) {
       if (groups.isNotEmpty && groups[0].rows.length >= 2) {
-        pairs.add((groups[0].rows[0].teamId, groups[0].rows[1].teamId));
+        tryPair(groups[0].rows[0].teamId, groups[0].rows[1].teamId);
       }
       return pairs;
     }
@@ -682,13 +807,13 @@ class CareerService {
       // Top bracket half: even group winners vs odd group runners-up.
       for (int i = 0; i < groups.length; i += 2) {
         if (groups[i].rows.isNotEmpty && groups[i + 1].rows.length > 1) {
-          pairs.add((groups[i].rows[0].teamId, groups[i + 1].rows[1].teamId));
+          tryPair(groups[i].rows[0].teamId, groups[i + 1].rows[1].teamId);
         }
       }
       // Bottom bracket half: odd group winners vs even group runners-up.
       for (int i = 0; i < groups.length; i += 2) {
         if (groups[i + 1].rows.isNotEmpty && groups[i].rows.length > 1) {
-          pairs.add((groups[i + 1].rows[0].teamId, groups[i].rows[1].teamId));
+          tryPair(groups[i + 1].rows[0].teamId, groups[i].rows[1].teamId);
         }
       }
     } else {
@@ -696,16 +821,20 @@ class CareerService {
       for (int i = 0; i < groups.length; i++) {
         final int next = (i + 1) % groups.length;
         if (groups[i].rows.isNotEmpty && groups[next].rows.length > 1) {
-          pairs.add((groups[i].rows[0].teamId, groups[next].rows[1].teamId));
+          tryPair(groups[i].rows[0].teamId, groups[next].rows[1].teamId);
         }
       }
     }
     return pairs;
   }
 
-  /// Safe weekday (Tuesdays or Wednesdays) after the latest fixture of a cup,
-  /// avoiding conflict with other competitions in the same week.
-  Future<DateTime> _nextCupDate(int seasonId, int tournamentId) async {
+  /// Safe weekday (Tuesdays, Wednesdays, or Thursdays) after the latest fixture of a cup,
+  /// avoiding conflict with other competitions and existing fixtures of participating teams.
+  Future<DateTime> _nextCupDate(
+    int seasonId,
+    int tournamentId, {
+    List<int>? teamIds,
+  }) async {
     final List<Map<String, Object?>> lastDateRows = await db.rawQuery(
       '''
       SELECT MAX(date) AS last_date FROM matches
@@ -729,30 +858,51 @@ class CareerService {
     final DateTime base =
         DateTime.tryParse(lastDate ?? '') ?? DateTime(startYear, 8, 9);
 
-    final List<Map<String, Object?>> allDates = await db.rawQuery(
+    final List<Map<String, Object?>> conflictRows = await db.rawQuery(
       '''
-      SELECT DISTINCT date FROM matches
+      SELECT date, home_team_id, away_team_id FROM matches
       WHERE season_id = ? AND date IS NOT NULL
     ''',
       <Object?>[seasonId],
     );
-    final Set<String> existingDates = <String>{
-      for (final Map<String, Object?> r in allDates)
-        if (r['date'] is String) r['date'] as String,
-    };
+    final Set<String> allExistingDates = <String>{};
+    final Map<int, Set<String>> teamMatchDates = <int, Set<String>>{};
+    for (final Map<String, Object?> r in conflictRows) {
+      final String d = r['date'] as String;
+      final int h = r['home_team_id'] as int;
+      final int a = r['away_team_id'] as int;
+      allExistingDates.add(d);
+      teamMatchDates.putIfAbsent(h, () => <String>{}).add(d);
+      teamMatchDates.putIfAbsent(a, () => <String>{}).add(d);
+    }
+
+    final Set<int> participating = teamIds == null
+        ? const <int>{}
+        : teamIds.toSet();
 
     DateTime candidate = base.add(const Duration(days: 8));
     while (true) {
-      if (candidate.weekday == DateTime.tuesday ||
-          candidate.weekday == DateTime.wednesday) {
+      final int wd = candidate.weekday;
+      if (wd == DateTime.tuesday ||
+          wd == DateTime.wednesday ||
+          wd == DateTime.thursday) {
         final String iso = _isoDate(candidate);
-        if (!existingDates.contains(iso)) {
+        final bool teamConflict = participating.any(
+          (int id) => teamMatchDates[id]?.contains(iso) ?? false,
+        );
+        if (!teamConflict && !allExistingDates.contains(iso)) {
           return candidate;
         }
       }
       candidate = candidate.add(const Duration(days: 1));
     }
   }
+
+  Future<int> resolveFixtureClashes(int seasonId) =>
+      _gen.resolveFixtureClashes(seasonId);
+
+  Future<void> repairSelfMatches(int seasonId) =>
+      _gen.repairSelfMatches(seasonId);
 
   String _isoDate(DateTime d) =>
       '${d.year.toString().padLeft(4, '0')}-'
@@ -876,7 +1026,8 @@ class CareerService {
       if (mine.isNotEmpty) {
         await _messages.insert(
           title: 'Prize money: ${tour.name}',
-          body: '${tour.name} paid your club '
+          body:
+              '${tour.name} paid your club '
               '${_money(mine.fold<int>(0, (int s, PrizeAward a) => s + a.amount))} '
               'in prize money.',
           teamId: userTeamId,
@@ -923,8 +1074,8 @@ class CareerService {
         60;
     final int confederation =
         ((countryRows.isEmpty ? null : countryRows.first['confederation'])
-                as int?) ??
-            0;
+            as int?) ??
+        0;
 
     final CompetitionKind kind = PrizeEngine.kindOf(
       organization: tour.organization,
@@ -1082,14 +1233,17 @@ class CareerService {
           current.seasonId,
           tour.tournamentId,
         );
-        final int idx = table.indexWhere((StandingRow r) => r.teamId == userTeamId);
+        final int idx = table.indexWhere(
+          (StandingRow r) => r.teamId == userTeamId,
+        );
         if (idx != -1) userRank = idx + 1;
       }
-      final List<String> sponsorBonuses = await _sponsorships.evaluateSeasonTargets(
-        teamId: userTeamId,
-        seasonId: current.seasonId,
-        finalLeagueRank: userRank,
-      );
+      final List<String> sponsorBonuses = await _sponsorships
+          .evaluateSeasonTargets(
+            teamId: userTeamId,
+            seasonId: current.seasonId,
+            finalLeagueRank: userRank,
+          );
       for (final String msg in sponsorBonuses) {
         await _messages.insert(
           title: 'Sponsorship Bonus Paid!',
@@ -1101,27 +1255,7 @@ class CareerService {
     }
 
     onProgress('Recalling loaned players...');
-    final List<Map<String, Object?>> loans = await db.query(t.teamLoans);
-    for (final Map<String, Object?> loan in loans) {
-      final int pid = loan['player_id'] as int;
-      final int parentId = loan['from_team_id'] as int;
-      await db.update(
-        t.teamPlayers,
-        <String, Object?>{'team_id': parentId},
-        where: 'player_id = ?',
-        whereArgs: <Object?>[pid],
-      );
-      await db.update(
-        t.players,
-        <String, Object?>{
-          'market_status': t.marketActive,
-          'squad_status': t.squadReserve,
-        },
-        where: 'player_id = ?',
-        whereArgs: <Object?>[pid],
-      );
-    }
-    await db.delete(t.teamLoans);
+    await recallFinishedLoans(current.endYear, userTeamId);
 
     onProgress('Archiving season stats...');
     for (final Tournament tour in tournaments) {
@@ -1182,6 +1316,57 @@ class CareerService {
     return plan.season;
   }
 
+  /// Sends loaned players home once their loan end date has passed. Loans run
+  /// whole seasons, so a loan agreed mid-season outlasts this season.
+  Future<void> recallFinishedLoans(int seasonEndYear, int userTeamId) async {
+    // Loans run whole seasons: only those whose end date has passed return.
+    final List<Map<String, Object?>> loans = await db.query(
+      t.teamLoans,
+      where: "CAST(substr(date_to, 1, 4) AS INTEGER) <= ?",
+      whereArgs: <Object?>[seasonEndYear],
+    );
+    for (final Map<String, Object?> loan in loans) {
+      final int pid = loan['player_id'] as int;
+      final int parentId = loan['from_team_id'] as int;
+      await db.update(
+        t.teamPlayers,
+        <String, Object?>{'team_id': parentId},
+        where: 'player_id = ?',
+        whereArgs: <Object?>[pid],
+      );
+      await db.update(
+        t.players,
+        <String, Object?>{
+          'market_status': t.marketActive,
+          'squad_status': t.squadReserve,
+        },
+        where: 'player_id = ?',
+        whereArgs: <Object?>[pid],
+      );
+      await db.delete(
+        t.teamLoans,
+        where: 'loan_id = ?',
+        whereArgs: <Object?>[loan['loan_id']],
+      );
+      if (parentId == userTeamId) {
+        final List<Map<String, Object?>> p = await db.query(
+          t.players,
+          columns: <String>['name'],
+          where: 'player_id = ?',
+          whereArgs: <Object?>[pid],
+          limit: 1,
+        );
+        await _messages.insert(
+          title: 'Loan ended',
+          body:
+              '${p.isEmpty ? 'A player' : p.first['name']} has returned from his loan spell.',
+          teamId: userTeamId,
+          sender: 'Transfer Desk',
+        );
+      }
+    }
+  }
+
   /// Winner of the last knockout round (the final) of a cup competition.
   Future<int?> _knockoutWinner(int seasonId, int tournamentId) async {
     final rows = await db.rawQuery(
@@ -1190,6 +1375,12 @@ class CareerService {
       WHERE season_id = ? AND tournament_id = ? AND status = ?
         AND phase = (SELECT MAX(phase) FROM matches
                      WHERE season_id = ? AND tournament_id = ?)
+        AND (leg = 2 OR leg = (
+          SELECT MAX(m2.leg) FROM matches m2
+          WHERE m2.season_id = matches.season_id
+            AND m2.tournament_id = matches.tournament_id
+            AND m2.phase = matches.phase
+        ))
         AND winner_id IS NOT NULL
       LIMIT 1
     ''',

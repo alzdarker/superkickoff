@@ -88,7 +88,7 @@ class _KnockoutBracketSheet extends StatelessWidget {
                   for (int phase = 1; phase <= totalRounds; phase++)
                     _RoundColumn(
                       title: knockoutRoundName(phase, totalRounds),
-                      matches: rounds[phase] ?? const <FixtureMatch>[],
+                      ties: groupTies(rounds[phase] ?? const <FixtureMatch>[]),
                       teams: teams,
                     ),
                   _ChampionColumn(champion: champion),
@@ -105,12 +105,12 @@ class _KnockoutBracketSheet extends StatelessWidget {
 class _RoundColumn extends StatelessWidget {
   const _RoundColumn({
     required this.title,
-    required this.matches,
+    required this.ties,
     required this.teams,
   });
 
   final String title;
-  final List<FixtureMatch> matches;
+  final List<KnockoutTie> ties;
   final Map<int, Team> teams;
 
   @override
@@ -133,7 +133,7 @@ class _RoundColumn extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Expanded(
-              child: matches.isEmpty
+              child: ties.isEmpty
                   ? const Center(
                       child: Text(
                         'Awaiting results',
@@ -144,8 +144,8 @@ class _RoundColumn extends StatelessWidget {
                   : ListView(
                       padding: EdgeInsets.zero,
                       children: <Widget>[
-                        for (final FixtureMatch match in matches)
-                          _MatchCard(match, teams),
+                        for (final KnockoutTie tie in ties)
+                          _MatchCard(tie, teams),
                       ],
                     ),
             ),
@@ -157,13 +157,16 @@ class _RoundColumn extends StatelessWidget {
 }
 
 class _MatchCard extends StatelessWidget {
-  const _MatchCard(this.match, this.teams);
+  const _MatchCard(this.tie, this.teams);
 
-  final FixtureMatch match;
+  final KnockoutTie tie;
   final Map<int, Team> teams;
 
   @override
   Widget build(BuildContext context) {
+    final FixtureMatch first = tie.first;
+    final FixtureMatch? second = tie.second;
+    final (int, int)? pens = tie.penalties;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -172,14 +175,37 @@ class _MatchCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(7),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          _teamRow(match.homeTeamId, match.homeGoals),
+          if (second != null)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 2),
+              child: Text(
+                'TWO LEGS',
+                style: TextStyle(
+                  fontSize: 8,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.accent,
+                  letterSpacing: .5,
+                ),
+              ),
+            ),
+          _teamRow(
+            first.homeTeamId,
+            first.homeGoals,
+            second?.awayGoals,
+            tie.homeAgg,
+          ),
           const Divider(height: 7),
-          _teamRow(match.awayTeamId, match.awayGoals),
-          if ((match.penaltyHomeGoals ?? 0) > 0 ||
-              (match.penaltyAwayGoals ?? 0) > 0)
+          _teamRow(
+            first.awayTeamId,
+            first.awayGoals,
+            second?.homeGoals,
+            tie.awayAgg,
+          ),
+          if (pens != null)
             Text(
-              'Pens ${match.penaltyHomeGoals}-${match.penaltyAwayGoals}',
+              'Pens ${pens.$1}-${pens.$2}',
               style: const TextStyle(fontSize: 9, color: AppTheme.warn),
             ),
         ],
@@ -187,8 +213,10 @@ class _MatchCard extends StatelessWidget {
     );
   }
 
-  Widget _teamRow(int teamId, int? goals) {
-    final bool winner = match.winnerId == teamId;
+  Widget _teamRow(int teamId, int? leg1Goals, int? leg2Goals, int agg) {
+    final bool winner = tie.winnerId == teamId;
+    final bool two = tie.twoLegged;
+    String score(int? goals, bool played) => played ? '${goals ?? 0}' : '-';
     return Row(
       children: <Widget>[
         Expanded(
@@ -204,12 +232,24 @@ class _MatchCard extends StatelessWidget {
           ),
         ),
         Text(
-          match.isPlayed ? '${goals ?? 0}' : '-',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: winner ? FontWeight.bold : FontWeight.normal,
-          ),
+          two
+              ? '${score(leg1Goals, tie.first.isPlayed)}  '
+                    '${score(leg2Goals, tie.second!.isPlayed)}'
+              : score(leg1Goals, tie.first.isPlayed),
+          style: const TextStyle(fontSize: 11, color: AppTheme.textDim),
         ),
+        if (two)
+          SizedBox(
+            width: 22,
+            child: Text(
+              tie.complete ? '$agg' : '-',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: winner ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -258,8 +298,11 @@ int knockoutTotalRounds(List<FixtureMatch> matches) {
   final int firstPhase = matches
       .map((FixtureMatch match) => match.phase)
       .reduce((int a, int b) => a < b ? a : b);
+  // Count ties, not matches: a two-legged round has two matches per tie.
   final int firstRoundMatches = matches
-      .where((FixtureMatch match) => match.phase == firstPhase)
+      .where(
+        (FixtureMatch match) => match.phase == firstPhase && match.leg == 1,
+      )
       .length;
   return (firstRoundMatches * 2).bitLength - 1;
 }

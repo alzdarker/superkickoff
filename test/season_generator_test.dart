@@ -195,15 +195,29 @@ void main() {
       expect(rows.length.isEven || rows.length == 1, isTrue);
     }
 
-    final List<Map<String, Object?>> foreignRows = await db.rawQuery(
+    final List<Map<String, Object?>> duplicates = await db.rawQuery(
       '''
-      SELECT COUNT(*) AS total FROM season_teams st
-      JOIN teams tm ON tm.team_id = st.team_id
-      WHERE st.season_id = ? AND tm.country_id != ?
+      SELECT m1.match_id as m1_id, m1.tournament_id as t1, m1.date as d1,
+             m2.match_id as m2_id, m2.tournament_id as t2,
+             m1.home_team_id as h1, m1.away_team_id as a1,
+             m2.home_team_id as h2, m2.away_team_id as a2
+      FROM matches m1
+      JOIN matches m2 ON m1.season_id = m2.season_id
+                     AND m1.date = m2.date
+                     AND m1.match_id < m2.match_id
+                     AND (m1.home_team_id = m2.home_team_id
+                          OR m1.home_team_id = m2.away_team_id
+                          OR m1.away_team_id = m2.home_team_id
+                          OR m1.away_team_id = m2.away_team_id)
+      WHERE m1.season_id = ?
     ''',
-      <Object?>[plan.season.seasonId, countryId],
+      <Object?>[plan.season.seasonId],
     );
-    expect(foreignRows.first['total'] as int, greaterThan(0));
+    expect(
+      duplicates,
+      isEmpty,
+      reason: 'no club should ever have two matches scheduled on the same date',
+    );
   });
 
   test('adds continental cups to an existing season', () async {
@@ -412,5 +426,86 @@ void main() {
     for (final FixtureSlot slot in slots) {
       expect(slot.home == slot.away, isFalse);
     }
+  });
+
+  test('schedules two legs for competitions with rounds == 2', () async {
+    final Tournament aclTwo = Tournament.fromMap(
+      (await db.query('tournaments', where: 'tournament_id = 164')).first,
+    );
+    expect(aclTwo.rounds, 2);
+
+    final List<Map<String, Object?>> teamRows = await db.query(
+      t.teams,
+      where: 'division = 1',
+      limit: 4,
+    );
+    final Map<int, Team> cache = <int, Team>{
+      for (final Map<String, Object?> r in teamRows)
+        r['team_id'] as int: Team.fromMap(r),
+    };
+    final SeasonGenerator generator = SeasonGenerator(db, random: Random(7));
+    const int seasonId = 999;
+    final int scheduled = await generator.scheduleCupRound(
+      seasonId,
+      164,
+      cache.keys.toList(),
+      phase: 1,
+      date: DateTime(2025, 9, 16),
+      allTeams: cache,
+    );
+    expect(scheduled, 4); // 2 ties x 2 legs = 4 matches
+
+    final List<Map<String, Object?>> leg1 = await db.query(
+      t.matches,
+      where: 'season_id = ? AND tournament_id = ? AND leg = 1',
+      whereArgs: <Object?>[seasonId, 164],
+    );
+    final List<Map<String, Object?>> leg2 = await db.query(
+      t.matches,
+      where: 'season_id = ? AND tournament_id = ? AND leg = 2',
+      whereArgs: <Object?>[seasonId, 164],
+    );
+    expect(leg1.length, 2);
+    expect(leg2.length, 2);
+  });
+
+  test('repairSelfMatches replaces corrupted same-team match with valid opponent', () async {
+    final SeasonGenerator generator = SeasonGenerator(db, random: Random(7));
+    const int seasonId = 888;
+    final List<Map<String, Object?>> teamRows = await db.query(
+      t.teams,
+      where: 'division = 1',
+      limit: 4,
+    );
+    for (final Map<String, Object?> r in teamRows) {
+      await db.insert(t.seasonTeams, <String, Object?>{
+        'team_id': r['team_id'],
+        'season_id': seasonId,
+      });
+    }
+
+    final int persibId = teamRows.first['team_id'] as int;
+    // Insert a corrupted self-match: Persib vs Persib
+    await db.insert(t.matches, <String, Object?>{
+      'season_id': seasonId,
+      'tournament_id': 164,
+      'home_team_id': persibId,
+      'away_team_id': persibId,
+      'phase': 1,
+      'leg': 1,
+      'status': t.matchScheduled,
+      'date': '2026-02-25',
+    });
+
+    await generator.repairSelfMatches(seasonId);
+
+    final List<Map<String, Object?>> matches = await db.query(
+      t.matches,
+      where: 'season_id = ? AND tournament_id = 164',
+      whereArgs: <Object?>[seasonId],
+    );
+    expect(matches.length, 1);
+    expect(matches.first['home_team_id'], persibId);
+    expect(matches.first['away_team_id'], isNot(equals(persibId)));
   });
 }

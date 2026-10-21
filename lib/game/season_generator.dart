@@ -162,6 +162,8 @@ class SeasonGenerator {
     }
 
     await _insertMatches(matchRows);
+    await resolveFixtureClashes(season.seasonId);
+    await repairSelfMatches(season.seasonId);
     return CareerPlan(
       season: season,
       leagueTournamentId: league.tournamentId,
@@ -261,7 +263,7 @@ class SeasonGenerator {
           : dateRows.first['next_date'] as String?;
       final DateTime base =
           DateTime.tryParse(nextDate ?? '') ?? DateTime(season.startYear, 8, 9);
-      final DateTime date = _nextWednesday(base.add(const Duration(days: 7)));
+      final DateTime date = _nextThursday(base.add(Duration(days: 7 * (added * 6 + 1))));
       if (entrants.length >= 8) {
         await scheduleGroupStage(
           season.seasonId,
@@ -282,12 +284,14 @@ class SeasonGenerator {
       }
       added++;
     }
+    await resolveFixtureClashes(season.seasonId);
+    await repairSelfMatches(season.seasonId);
     return added;
   }
 
-  DateTime _nextWednesday(DateTime from) {
+  DateTime _nextThursday(DateTime from) {
     DateTime d = from;
-    while (d.weekday != DateTime.wednesday) {
+    while (d.weekday != DateTime.thursday) {
       d = d.add(const Duration(days: 1));
     }
     return d;
@@ -344,7 +348,7 @@ class SeasonGenerator {
     required DateTime start,
     required Map<int, Team> allTeams,
   }) async {
-    final List<int> sorted = List<int>.of(entrants)
+    final List<int> sorted = entrants.toSet().toList()
       ..sort(
         (int a, int b) =>
             (allTeams[b]?.power ?? 0).compareTo(allTeams[a]?.power ?? 0),
@@ -401,48 +405,61 @@ class SeasonGenerator {
     required Map<int, Team> allTeams,
     List<(int, int)>? pairs,
   }) async {
-    final List<Map<String, Object?>> rows = <Map<String, Object?>>[];
-    if (pairs != null) {
-      for (final (int a, int b) in pairs) {
-        final Team? homeTeam = allTeams[a];
-        final Team? awayTeam = allTeams[b];
-        if (homeTeam == null || awayTeam == null) continue;
-        rows.add(
-          _matchRow(
-            seasonId,
-            cupTournamentId,
-            homeTeam,
-            awayTeam,
-            round: phase,
-            phase: phase,
-            leg: 1,
-            date: _iso(date),
-          ),
-        );
-      }
-    } else {
+    final List<Map<String, Object?>> tourRows = await db.query(
+      t.tournaments,
+      columns: <String>['rounds'],
+      where: 'tournament_id = ?',
+      whereArgs: <Object?>[cupTournamentId],
+      limit: 1,
+    );
+    final int roundsSetting =
+        tourRows.isEmpty ? 1 : ((tourRows.first['rounds'] as int?) ?? 1);
+    final int tieCount = pairs != null ? pairs.length : (survivors.length ~/ 2);
+    // Knockout rounds before the final are 2-legged if the tournament setting is rounds == 2.
+    final bool twoLegged = roundsSetting == 2 && tieCount > 1;
+
+    final List<(int, int)> matchPairs = pairs ?? <(int, int)>[];
+    if (pairs == null) {
       final List<int> ids = List<int>.of(survivors)
         ..sort(
           (int a, int b) =>
               (allTeams[b]?.power ?? 0).compareTo(allTeams[a]?.power ?? 0),
         );
       while (ids.length > 1) {
-        // Pair strongest vs weakest for balance.
-        final int a = ids.removeAt(0);
-        final int b = ids.removeLast();
-        final Team? homeTeam = allTeams[a];
-        final Team? awayTeam = allTeams[b];
-        if (homeTeam == null || awayTeam == null) continue;
+        matchPairs.add((ids.removeAt(0), ids.removeLast()));
+      }
+    }
+
+    final List<Map<String, Object?>> rows = <Map<String, Object?>>[];
+    for (final (int a, int b) in matchPairs) {
+      if (a == b) continue;
+      final Team? homeTeam = allTeams[a];
+      final Team? awayTeam = allTeams[b];
+      if (homeTeam == null || awayTeam == null) continue;
+      rows.add(
+        _matchRow(
+          seasonId,
+          cupTournamentId,
+          homeTeam,
+          awayTeam,
+          round: phase,
+          phase: phase,
+          leg: 1,
+          date: _iso(date),
+        ),
+      );
+      if (twoLegged) {
+        // Return leg (Leg 2) played ~7 days later with reversed venues.
         rows.add(
           _matchRow(
             seasonId,
             cupTournamentId,
-            homeTeam,
             awayTeam,
+            homeTeam,
             round: phase,
             phase: phase,
-            leg: 1,
-            date: _iso(date),
+            leg: 2,
+            date: _iso(date.add(const Duration(days: 7))),
           ),
         );
       }
@@ -485,6 +502,7 @@ class SeasonGenerator {
       whereArgs: <Object?>[tour.tournamentId],
     );
     final List<Team> teams = <Team>[];
+    final Set<int> addedIds = <int>{};
     for (final Map<String, Object?> row in rows) {
       final int countryId = row['country_id'] as int;
       final int slots = (row['slots'] as int?) ?? 0;
@@ -494,7 +512,10 @@ class SeasonGenerator {
         beforeSeasonId: beforeSeasonId,
       );
       final List<Team> picked = clubs
-          .where((Team tm) => !exclude.contains(tm.teamId))
+          .where(
+            (Team tm) =>
+                !exclude.contains(tm.teamId) && addedIds.add(tm.teamId),
+          )
           .take(slots)
           .toList();
       teams.addAll(picked);
@@ -754,18 +775,22 @@ class SeasonGenerator {
     return _startDate.add(Duration(days: 7 * weekOffset - 3));
   }
 
-  /// Continental rounds get their own mid-week slot (Tuesdays) so they never
-  /// land on the domestic cup's dates (Wednesdays) or league matchdays (Saturdays).
+  /// Continental rounds get their own mid-week slots (Tuesdays or Thursdays) so
+  /// they never land on domestic cup dates (Wednesdays) or league matchdays (Saturdays).
   DateTime _internationalDate(int index) {
-    final int weekOffset = 3 + index * 4;
-    return _startDate.add(Duration(days: 7 * weekOffset - 4));
+    final int dayOffset = index.isEven ? -4 : -2;
+    final int weekOffset = 3 + (index ~/ 2) * 6;
+    return _startDate.add(Duration(days: 7 * weekOffset + dayOffset));
   }
 
   /// Sorts teams by power (seeding) and returns their ids.
   /// Seeds the cup by club power and trims the field to the largest power of
   /// two that fits, which keeps every knockout round evenly paired.
   List<int> seedByIdes(List<Team> teams) {
-    final List<Team> sorted = List<Team>.of(teams)
+    final Map<int, Team> unique = <int, Team>{
+      for (final Team tm in teams) tm.teamId: tm,
+    };
+    final List<Team> sorted = unique.values.toList()
       ..sort((Team a, Team b) => b.power.compareTo(a.power));
     int bracket = 1;
     while (bracket * 2 <= sorted.length) {
@@ -783,6 +808,153 @@ class SeasonGenerator {
       rounds++;
     }
     return rounds;
+  }
+
+  /// Fixes any corrupted matches where a club was scheduled against itself.
+  Future<void> repairSelfMatches(int seasonId) async {
+    final List<Map<String, Object?>> selfMatches = await db.query(
+      t.matches,
+      where: 'season_id = ? AND home_team_id = away_team_id',
+      whereArgs: <Object?>[seasonId],
+    );
+    if (selfMatches.isEmpty) return;
+
+    for (final Map<String, Object?> m in selfMatches) {
+      final int matchId = m['match_id'] as int;
+      final int tournamentId = m['tournament_id'] as int;
+      final int phase = (m['phase'] as int?) ?? 1;
+      final int teamId = m['home_team_id'] as int;
+
+      // Find other clubs in this tournament phase that are already playing:
+      final List<Map<String, Object?>> playingRows = await db.rawQuery(
+        '''
+        SELECT home_team_id AS id FROM matches WHERE season_id = ? AND tournament_id = ? AND phase = ? AND match_id != ?
+        UNION
+        SELECT away_team_id AS id FROM matches WHERE season_id = ? AND tournament_id = ? AND phase = ? AND match_id != ?
+        ''',
+        <Object?>[
+          seasonId,
+          tournamentId,
+          phase,
+          matchId,
+          seasonId,
+          tournamentId,
+          phase,
+          matchId,
+        ],
+      );
+      final Set<int> busyIds = <int>{
+        for (final Map<String, Object?> r in playingRows) r['id'] as int,
+      };
+      busyIds.add(teamId);
+
+      final String notInClause =
+          busyIds.isEmpty ? '0' : busyIds.join(',');
+
+      // Find an available team registered in this season to serve as opponent:
+      final List<Map<String, Object?>> candidateRows = await db.rawQuery(
+        '''
+        SELECT tm.team_id FROM season_teams st
+        JOIN teams tm ON tm.team_id = st.team_id
+        WHERE st.season_id = ? AND tm.team_id NOT IN ($notInClause)
+        ORDER BY tm.power DESC
+        LIMIT 1
+        ''',
+        <Object?>[seasonId],
+      );
+
+      if (candidateRows.isNotEmpty) {
+        final int oppId = candidateRows.first['team_id'] as int;
+        await db.update(
+          t.matches,
+          <String, Object?>{'away_team_id': oppId},
+          where: 'match_id = ?',
+          whereArgs: <Object?>[matchId],
+        );
+      } else {
+        await db.delete(
+          t.matches,
+          where: 'match_id = ?',
+          whereArgs: <Object?>[matchId],
+        );
+      }
+    }
+  }
+
+  /// Resolves any scheduling clash where a team has multiple matches on the
+  /// same date, shifting the later match to the nearest available mid-week date
+  /// (Tuesdays, Wednesdays, or Thursdays) where neither club has a fixture.
+  Future<int> resolveFixtureClashes(int seasonId) async {
+    final List<Map<String, Object?>> matches = await db.rawQuery(
+      '''
+      SELECT match_id, tournament_id, home_team_id, away_team_id, date
+      FROM matches
+      WHERE season_id = ? AND date IS NOT NULL AND status = ?
+      ORDER BY date ASC, match_id ASC
+    ''',
+      <Object?>[seasonId, t.matchScheduled],
+    );
+
+    final Map<int, Set<String>> teamDates = <int, Set<String>>{};
+    final List<Map<String, Object?>> played = await db.rawQuery(
+      '''
+      SELECT home_team_id, away_team_id, date FROM matches
+      WHERE season_id = ? AND date IS NOT NULL AND status = ?
+    ''',
+      <Object?>[seasonId, t.matchFinished],
+    );
+    for (final Map<String, Object?> r in played) {
+      final String d = r['date'] as String;
+      final int h = r['home_team_id'] as int;
+      final int a = r['away_team_id'] as int;
+      teamDates.putIfAbsent(h, () => <String>{}).add(d);
+      teamDates.putIfAbsent(a, () => <String>{}).add(d);
+    }
+
+    int moved = 0;
+    for (final Map<String, Object?> m in matches) {
+      final int matchId = m['match_id'] as int;
+      final int home = m['home_team_id'] as int;
+      final int away = m['away_team_id'] as int;
+      final String originalDate = m['date'] as String;
+
+      final bool homeClash = teamDates[home]?.contains(originalDate) ?? false;
+      final bool awayClash = teamDates[away]?.contains(originalDate) ?? false;
+
+      if (!homeClash && !awayClash) {
+        teamDates.putIfAbsent(home, () => <String>{}).add(originalDate);
+        teamDates.putIfAbsent(away, () => <String>{}).add(originalDate);
+        continue;
+      }
+
+      // Conflict found! Find the earliest mid-week date where neither team has a match.
+      DateTime candidate =
+          DateTime.tryParse(originalDate) ?? DateTime(2025, 8, 9);
+      while (true) {
+        candidate = candidate.add(const Duration(days: 1));
+        final int wd = candidate.weekday;
+        if (wd == DateTime.tuesday ||
+            wd == DateTime.wednesday ||
+            wd == DateTime.thursday) {
+          final String iso = _iso(candidate);
+          final bool hFree = !(teamDates[home]?.contains(iso) ?? false);
+          final bool aFree = !(teamDates[away]?.contains(iso) ?? false);
+          if (hFree && aFree) {
+            await db.update(
+              t.matches,
+              <String, Object?>{'date': iso},
+              where: 'match_id = ?',
+              whereArgs: <Object?>[matchId],
+            );
+            teamDates.putIfAbsent(home, () => <String>{}).add(iso);
+            teamDates.putIfAbsent(away, () => <String>{}).add(iso);
+            moved++;
+            break;
+          }
+        }
+      }
+    }
+    return moved;
   }
 
   String _iso(DateTime d) =>
