@@ -266,6 +266,47 @@ class SeasonGenerator {
     return d;
   }
 
+  /// Schedules 3 pre-season friendly matches for [userTeamId] before the league season kicks off.
+  Future<void> schedulePreSeasonFriendlies({
+    required int seasonId,
+    required int userTeamId,
+    required Map<int, Team> allTeams,
+  }) async {
+    final Team? userTeam = allTeams[userTeamId];
+    if (userTeam == null) return;
+
+    final List<Team> candidates = allTeams.values
+        .where((Team t) => t.teamId != userTeamId)
+        .toList();
+    if (candidates.length < 3) return;
+    candidates.shuffle(_rng);
+
+    final List<Map<String, Object?>> rows = <Map<String, Object?>>[];
+    final List<DateTime> dates = <DateTime>[
+      _startDate.subtract(const Duration(days: 17)),
+      _startDate.subtract(const Duration(days: 10)),
+      _startDate.subtract(const Duration(days: 3)),
+    ];
+
+    for (int i = 0; i < 3; i++) {
+      final Team opp = candidates[i];
+      final bool home = i % 2 == 0;
+      rows.add(
+        _matchRow(
+          seasonId,
+          9999,
+          home ? userTeam : opp,
+          home ? opp : userTeam,
+          round: i + 1,
+          phase: 0,
+          leg: 1,
+          date: _iso(dates[i]),
+        ),
+      );
+    }
+    await _insertMatches(rows);
+  }
+
   /// Builds a group stage: clubs are spread snake-style over groups of four,
   /// then play a double round robin. The top two of every group advance to
   /// the knockout rounds, which [generateCareer] leaves for later.

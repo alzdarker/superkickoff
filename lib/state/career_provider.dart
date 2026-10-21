@@ -11,8 +11,10 @@ import '../data/repositories/match_repository.dart';
 import '../data/repositories/message_repository.dart';
 import '../data/repositories/prize_repository.dart';
 import '../data/repositories/reference_repository.dart';
+import '../data/repositories/scouting_repository.dart';
 import '../data/repositories/season_repository.dart';
 import '../data/repositories/squad_repository.dart';
+import '../data/repositories/sponsorship_repository.dart';
 import '../data/repositories/transfer_repository.dart';
 import '../game/career_service.dart';
 import '../game/formation.dart';
@@ -33,6 +35,8 @@ class CareerProvider extends ChangeNotifier {
   late MessageRepository _messages;
   late TransferRepository _transfers;
   late PrizeRepository _prizes;
+  late SponsorshipRepository _sponsorships;
+  late ScoutingRepository _scouting;
   late CareerService _service;
   late MatchEngine _engine;
   final Random _rng = Random();
@@ -97,6 +101,8 @@ class CareerProvider extends ChangeNotifier {
     _messages = MessageRepository(_db);
     _transfers = TransferRepository(_db);
     _prizes = PrizeRepository(_db);
+    _sponsorships = SponsorshipRepository(_db);
+    _scouting = ScoutingRepository(_db);
     _engine = MatchEngine();
     _service = CareerService(
       _db,
@@ -107,6 +113,8 @@ class CareerProvider extends ChangeNotifier {
       messages: _messages,
       prizes: _prizes,
       transfers: _transfers,
+      sponsorships: _sponsorships,
+      scouting: _scouting,
       engine: _engine,
       generator: SeasonGenerator(_db, random: _rng),
       random: _rng,
@@ -344,6 +352,12 @@ class CareerProvider extends ChangeNotifier {
       for (final Map<String, Object?> row in rows)
         row['team_id'] as int: Team.fromMap(row),
     };
+    // Schedule 3 pre-season friendly matches for user team!
+    await SeasonGenerator(_db, random: _rng).schedulePreSeasonFriendlies(
+      seasonId: plan.season.seasonId,
+      userTeamId: teamId,
+      allTeams: teamCache,
+    );
     hasCareer = true;
     await AppDatabase.beginSession();
     await refreshWorld();
@@ -421,6 +435,7 @@ class CareerProvider extends ChangeNotifier {
   }
 
   String competitionLabel(FixtureMatch match) {
+    if (match.tournamentId == 9999) return 'Friendly';
     if (match.tournamentId == league?.tournamentId) {
       return league?.name ?? 'League';
     }
@@ -746,7 +761,24 @@ class CareerProvider extends ChangeNotifier {
         : t.marketForSale;
     await _squads.setMarketStatus(p.playerId, newMarket);
     if (newMarket == t.marketForSale) {
+      if (p.squadStatus == t.squadLoanListed) {
+        await _squads.setSquadStatus(p.playerId, t.squadReserve);
+      }
       await _service.requestSaleOffer(userTeamId: userTeamId, player: p);
+    }
+    await refreshWorld();
+  }
+
+  Future<void> toggleListedForLoan(Player p) async {
+    final int newStatus = p.squadStatus == t.squadLoanListed
+        ? t.squadReserve
+        : t.squadLoanListed;
+    await _squads.setSquadStatus(p.playerId, newStatus);
+    if (newStatus == t.squadLoanListed) {
+      if (p.marketStatus == t.marketForSale) {
+        await _squads.setMarketStatus(p.playerId, t.marketActive);
+      }
+      await _service.requestLoanOffer(userTeamId: userTeamId, player: p);
     }
     await refreshWorld();
   }
@@ -998,6 +1030,38 @@ class CareerProvider extends ChangeNotifier {
     await refreshWorld();
   }
 
+  /// Accepts an AI club's loan offer for one of the manager's players.
+  Future<String?> acceptLoanOffer(int offerId) async {
+    final TransferOffer? offer = await _transfers.getOffer(offerId);
+    if (offer == null || offer.fromTeamId != userTeamId) {
+      return 'Loan offer not found';
+    }
+    if (offer.status != t.offerPending) return 'This offer is no longer active';
+
+    final String? error = await _transfers.completeLoan(offerId);
+    if (error != null) return error;
+
+    await _messages.insert(
+      title: 'Loan deal completed',
+      body: '${offer.playerName} joined ${offer.toTeamName} on loan until the end of the season. '
+          'Your club received a loan fee of ${fmt.money(offer.offerAmount)}.',
+      teamId: userTeamId,
+      sender: 'Transfer Desk',
+      transferOfferId: offerId,
+    );
+    await refreshWorld();
+    return null;
+  }
+
+  Future<List<YouthProspect>> pendingProspects() =>
+      _squads.pendingProspects(userTeamId);
+
+  Future<Player?> signYouthProspect(int prospectId) async {
+    final Player? player = await _squads.signProspect(prospectId);
+    if (player != null) await refreshWorld();
+    return player;
+  }
+
   /// Propose contract terms to player.
   Future<String?> proposeContract({
     required int offerId,
@@ -1086,6 +1150,79 @@ class CareerProvider extends ChangeNotifier {
   /// Get pending transfer offers.
   Future<List<TransferOffer>> pendingTransferOffers() =>
       _transfers.pendingOffersForTeam(userTeamId);
+
+  // ----------------------------------------------------------- sponsorships
+
+  Future<List<ClubSponsorship>> activeSponsorships() =>
+      _sponsorships.activeSponsorships(userTeamId, season?.seasonId ?? 0);
+
+  Future<List<ClubSponsorship>> availableSponsorshipOffers() =>
+      _sponsorships.availableOffers(
+        teamId: userTeamId,
+        seasonId: season?.seasonId ?? 0,
+        clubPower: userTeam?.power ?? 60,
+      );
+
+  Future<void> signSponsorship(ClubSponsorship offer) async {
+    await _sponsorships.signSponsorship(offer);
+    await _messages.insert(
+      title: 'Sponsorship signed: ${offer.sponsorName}',
+      body: 'Signed ${offer.typeLabel} deal with ${offer.sponsorName}. '
+          'Received upfront bonus of ${fmt.money(offer.baseReward)} and weekly '
+          'payments of ${fmt.money(offer.weeklyReward)}.',
+      teamId: userTeamId,
+      sender: 'Commercial Director',
+    );
+    await refreshWorld();
+  }
+
+  // --------------------------------------------------------------- scouting
+
+  Future<List<Scout>> hiredScouts() => _scouting.hiredScouts(userTeamId);
+
+  List<Scout> availableScoutsToHire() => _scouting.availableScoutsToHire();
+
+  Future<String?> hireScout(Scout candidate) async {
+    final String? error = await _scouting.hireScout(userTeamId, candidate);
+    if (error == null) await refreshWorld();
+    return error;
+  }
+
+  Future<void> fireScout(int scoutId) async {
+    await _scouting.fireScout(scoutId);
+    await refreshWorld();
+  }
+
+  Future<List<ScoutWonderkid>> deployScout(Scout scout, String region) async {
+    final String date = nextDate ?? '2025-08-01';
+    final List<ScoutWonderkid> found = await _scouting.deployScout(
+      teamId: userTeamId,
+      scout: scout,
+      region: region,
+      date: date,
+    );
+    await _messages.insert(
+      title: 'Scouting Report: ${scout.name} ($region)',
+      body: '${scout.name} has completed scouting in $region and discovered '
+          '${found.length} young wonderkids. Review their profiles in the Market Scouting tab.',
+      teamId: userTeamId,
+      sender: 'Chief Scout',
+    );
+    await refreshWorld();
+    return found;
+  }
+
+  Future<List<ScoutWonderkid>> pendingWonderkids() =>
+      _scouting.pendingWonderkids(userTeamId);
+
+  Future<String?> signWonderkid(int reportId) async {
+    final String? error = await _scouting.signWonderkid(
+      reportId: reportId,
+      teamId: userTeamId,
+    );
+    if (error == null) await refreshWorld();
+    return error;
+  }
 
   // ---------------------------------------------------------------- inbox
 

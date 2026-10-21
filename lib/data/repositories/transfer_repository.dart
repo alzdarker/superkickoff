@@ -16,6 +16,7 @@ class TransferRepository {
     required int toTeamId,
     required int offerAmount,
     required int playerValue,
+    bool isLoan = false,
   }) async {
     return await db.insert(t.transferOffers, <String, Object?>{
       'player_id': playerId,
@@ -24,6 +25,7 @@ class TransferRepository {
       'offer_amount': offerAmount,
       'player_value': playerValue,
       'status': t.offerPending,
+      'is_loan': isLoan ? 1 : 0,
       'created_date': _todayIso(),
     });
   }
@@ -239,6 +241,95 @@ class TransferRepository {
       await updatePower(offer.fromTeamId);
 
       // Mark offer as completed
+      await txn.update(
+        t.transferOffers,
+        <String, Object?>{
+          'status': t.offerCompleted,
+          'updated_date': _todayIso(),
+        },
+        where: 'offer_id = ?',
+        whereArgs: <Object?>[offerId],
+      );
+
+      return null;
+    });
+    return error;
+  }
+
+  /// Complete a loan deal (moves player on loan, transfers loan fee).
+  Future<String?> completeLoan(int offerId) async {
+    final TransferOffer? offer = await getOffer(offerId);
+    if (offer == null) return 'Loan offer not found';
+
+    final String? error = await db.transaction((Transaction txn) async {
+      final List<Map<String, Object?>> borrowerRows = await txn.query(
+        t.teams,
+        where: 'team_id = ?',
+        whereArgs: <Object?>[offer.toTeamId],
+        limit: 1,
+      );
+      if (borrowerRows.isEmpty) return 'Borrowing team not found';
+      final int borrowerBudget =
+          (borrowerRows.first['budget'] as int?) ?? 0;
+      if (borrowerBudget < offer.offerAmount) return 'Not enough budget';
+
+      final List<Map<String, Object?>> lenderRows = await txn.query(
+        t.teams,
+        where: 'team_id = ?',
+        whereArgs: <Object?>[offer.fromTeamId],
+        limit: 1,
+      );
+      final int lenderBudget = lenderRows.isEmpty
+          ? 0
+          : ((lenderRows.first['budget'] as int?) ?? 0);
+
+      // Move player to borrower squad in team_players
+      await txn.update(
+        t.teamPlayers,
+        <String, Object?>{'team_id': offer.toTeamId},
+        where: 'player_id = ?',
+        whereArgs: <Object?>[offer.playerId],
+      );
+
+      // Mark player status as on-loan
+      await txn.update(
+        t.players,
+        <String, Object?>{
+          'market_status': t.marketOnLoan,
+          'squad_status': t.squadLoanListed,
+          'is_captain': 0,
+        },
+        where: 'player_id = ?',
+        whereArgs: <Object?>[offer.playerId],
+      );
+
+      // Transfer loan fee
+      await txn.update(
+        t.teams,
+        <String, Object?>{'budget': borrowerBudget - offer.offerAmount},
+        where: 'team_id = ?',
+        whereArgs: <Object?>[offer.toTeamId],
+      );
+      await txn.update(
+        t.teams,
+        <String, Object?>{'budget': lenderBudget + offer.offerAmount},
+        where: 'team_id = ?',
+        whereArgs: <Object?>[offer.fromTeamId],
+      );
+
+      // Record in team_loans
+      final int year = DateTime.now().year;
+      await txn.insert(t.teamLoans, <String, Object?>{
+        'player_id': offer.playerId,
+        'from_team_id': offer.fromTeamId,
+        'to_team_id': offer.toTeamId,
+        'date_from': _todayIso(),
+        'date_to': '${year + 1}-06-30',
+        'months': 12,
+        'notified': 0,
+      });
+
+      // Update offer status to completed
       await txn.update(
         t.transferOffers,
         <String, Object?>{

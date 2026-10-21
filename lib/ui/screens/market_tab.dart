@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/format.dart';
 import '../../data/models/models.dart';
+import '../../data/repositories/scouting_repository.dart';
 import '../../state/career_provider.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -169,7 +170,7 @@ class _MarketTabState extends State<MarketTab> {
   Widget build(BuildContext context) {
     final CareerProvider game = context.watch<CareerProvider>();
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Column(
         children: <Widget>[
           Padding(
@@ -202,6 +203,7 @@ class _MarketTabState extends State<MarketTab> {
             tabs: <Widget>[
               Tab(text: 'Listed players'),
               Tab(text: 'All Players'),
+              Tab(text: 'Scouting'),
               Tab(text: 'Transfer history'),
             ],
           ),
@@ -210,6 +212,7 @@ class _MarketTabState extends State<MarketTab> {
               children: <Widget>[
                 _listedTab(),
                 _allPlayersTab(),
+                _scoutingTab(),
                 const _TransferHistory(),
               ],
             ),
@@ -391,6 +394,290 @@ class _MarketTabState extends State<MarketTab> {
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _scoutingTab() {
+    final CareerProvider game = context.watch<CareerProvider>();
+    return RefreshIndicator(
+      onRefresh: () async => setState(() {}),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Text(
+                'Scouting Department',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              const Spacer(),
+              FilledButton.tonalIcon(
+                onPressed: () => _showHireScoutSheet(context),
+                icon: const Icon(Icons.person_add, size: 16),
+                label: const Text('Recruit Scout'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          FutureBuilder<List<Scout>>(
+            future: game.hiredScouts(),
+            builder: (BuildContext context, AsyncSnapshot<List<Scout>> snap) {
+              final List<Scout> scouts = snap.data ?? <Scout>[];
+              if (scouts.isEmpty) {
+                return Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceCard,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'No scouts hired yet. Recruit scouts with high star ratings to uncover elite wonderkids worldwide!',
+                    style: TextStyle(fontSize: 11, color: AppTheme.textDim),
+                  ),
+                );
+              }
+              return Column(
+                children: <Widget>[
+                  for (final Scout scout in scouts)
+                    Card(
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: AppTheme.accent.withValues(alpha: 0.15),
+                          child: const Icon(Icons.radar, color: AppTheme.accent),
+                        ),
+                        title: Row(
+                          children: <Widget>[
+                            Text(scout.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            const SizedBox(width: 6),
+                            Stars(value: scout.stars, size: 10),
+                          ],
+                        ),
+                        subtitle: Text(
+                          scout.isScouting
+                              ? 'Scouting in ${scout.region} · ${money(scout.salary)}/w'
+                              : 'Ready for assignment · ${money(scout.salary)}/w',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: scout.isScouting ? AppTheme.accent : AppTheme.textDim,
+                          ),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            FilledButton(
+                              style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                              onPressed: () => _deployScoutDialog(context, scout),
+                              child: Text(scout.isScouting ? 'Re-deploy' : 'Deploy'),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, size: 16, color: AppTheme.textDim),
+                              tooltip: 'Release scout',
+                              onPressed: () async {
+                                await game.fireScout(scout.scoutId);
+                                setState(() {});
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+          const Divider(height: 32),
+          const Text(
+            'Discovered Wonderkids',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
+          const SizedBox(height: 6),
+          FutureBuilder<List<ScoutWonderkid>>(
+            future: game.pendingWonderkids(),
+            builder: (BuildContext context, AsyncSnapshot<List<ScoutWonderkid>> snap) {
+              final List<ScoutWonderkid> list = snap.data ?? <ScoutWonderkid>[];
+              if (list.isEmpty) {
+                return Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceCard,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'No wonderkids scouted yet. Deploy your scouts to South America, Europe, Africa, or Asia to discover talent!',
+                    style: TextStyle(fontSize: 11, color: AppTheme.textDim),
+                  ),
+                );
+              }
+              return Column(
+                children: <Widget>[
+                  for (final ScoutWonderkid w in list)
+                    Card(
+                      child: ListTile(
+                        leading: PositionBadge(positionId: w.positionId),
+                        title: Row(
+                          children: <Widget>[
+                            Text(w.playerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            const SizedBox(width: 6),
+                            Text('OVR ${w.power}', style: const TextStyle(fontSize: 12, color: AppTheme.accent, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        subtitle: Text(
+                          '${w.age}y · Potential ${w.potential}+ · ${w.region} (${w.scoutName})\nValue ${money(w.value)} · Fee ${money((w.value * 0.75).round())}',
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        isThreeLine: true,
+                        trailing: FilledButton(
+                          style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                          onPressed: () async {
+                            final String? err = await game.signWonderkid(w.reportId);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text(err ?? '${w.playerName} joined your squad!')),
+                              );
+                              setState(() {});
+                            }
+                          },
+                          child: const Text('Sign'),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showHireScoutSheet(BuildContext context) {
+    final CareerProvider game = context.read<CareerProvider>();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext sheetContext) {
+        final List<Scout> candidates = game.availableScoutsToHire();
+        return Container(
+          height: MediaQuery.of(sheetContext).size.height * 0.70,
+          decoration: const BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade700,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Recruit Scouts',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Hire scouts with higher star ratings to discover higher-potential wonderkids worldwide.',
+                style: TextStyle(fontSize: 11, color: AppTheme.textDim),
+              ),
+              const Divider(height: 20),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: candidates.length,
+                  itemBuilder: (BuildContext _, int i) {
+                    final Scout c = candidates[i];
+                    final int fee = ScoutingRepository.hiringCostForStars(c.stars);
+                    return Card(
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: AppTheme.accent.withValues(alpha: 0.15),
+                          child: Text('${c.stars}★', style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.accent)),
+                        ),
+                        title: Row(
+                          children: <Widget>[
+                            Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            const SizedBox(width: 6),
+                            Stars(value: c.stars, size: 10),
+                          ],
+                        ),
+                        subtitle: Text(
+                          'Region: ${c.region} · Wage: ${money(c.salary)}/w\nRecruitment fee: ${money(fee)}',
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        isThreeLine: true,
+                        trailing: FilledButton(
+                          style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                          onPressed: () async {
+                            final String? err = await game.hireScout(c);
+                            if (context.mounted) {
+                              Navigator.pop(sheetContext);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text(err ?? '${c.name} hired as scout!')),
+                              );
+                              setState(() {});
+                            }
+                          },
+                          child: const Text('Hire'),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _deployScoutDialog(BuildContext context, Scout scout) {
+    final CareerProvider game = context.read<CareerProvider>();
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text('Deploy ${scout.name}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('Stars: ${scout.stars}★ · Wage: ${money(scout.salary)}/week'),
+            const SizedBox(height: 12),
+            const Text('Select target scouting region:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+            const SizedBox(height: 8),
+            for (final String region in ScoutingRepository.regions)
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.travel_explore, size: 20, color: AppTheme.accent),
+                title: Text(region, style: const TextStyle(fontSize: 13)),
+                onTap: () async {
+                  Navigator.pop(dialogContext);
+                  final List<ScoutWonderkid> found = await game.deployScout(scout, region);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('${scout.name} scouted $region and discovered ${found.length} wonderkids!')),
+                    );
+                    setState(() {});
+                  }
+                },
+              ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
     );
   }
 }

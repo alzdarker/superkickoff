@@ -833,6 +833,7 @@ class TransferOffer {
     required this.createdDate,
     this.updatedDate,
     this.messageId,
+    this.isLoan = false,
   });
 
   final int offerId;
@@ -852,6 +853,7 @@ class TransferOffer {
   final String createdDate;
   final String? updatedDate;
   final int? messageId;
+  final bool isLoan;
 
   factory TransferOffer.fromMap(Map<String, Object?> m) => TransferOffer(
     offerId: m['offer_id'] as int,
@@ -871,6 +873,202 @@ class TransferOffer {
     createdDate: m['created_date'] as String? ?? '',
     updatedDate: m['updated_date'] as String?,
     messageId: m['message_id'] as int?,
+    isLoan: (m['is_loan'] as int? ?? 0) == 1,
+  );
+}
+
+/// An unassigned prospect graduated from the youth academy.
+class YouthProspect {
+  YouthProspect({
+    required this.prospectId,
+    required this.teamId,
+    required this.name,
+    required this.age,
+    required this.positionId,
+    required this.power,
+    required this.potential,
+    required this.stars,
+    required this.profile,
+    required this.height,
+    required this.countryId,
+    required this.createdDate,
+    required this.signed,
+  });
+
+  final int prospectId;
+  final int teamId;
+  final String name;
+  final int age;
+  final int positionId;
+  final int power;
+  final int potential;
+  final int stars;
+  final String profile;
+  final int height;
+  final int countryId;
+  final String createdDate;
+  final bool signed;
+
+  factory YouthProspect.fromMap(Map<String, Object?> m) => YouthProspect(
+    prospectId: m['prospect_id'] as int,
+    teamId: m['team_id'] as int,
+    name: m['name'] as String? ?? 'Prospect',
+    age: (m['age'] as int?) ?? 17,
+    positionId: (m['position_id'] as int?) ?? 1,
+    power: (m['power'] as int?) ?? 50,
+    potential: (m['potential'] as int?) ?? 60,
+    stars: (m['stars'] as int?) ?? 0,
+    profile: (m['profile'] as String?) ?? 'D',
+    height: (m['height'] as int?) ?? 178,
+    countryId: (m['country_id'] as int?) ?? 141,
+    createdDate: (m['created_date'] as String?) ?? '',
+    signed: (m['signed'] as int? ?? 0) == 1,
+  );
+}
+
+/// An active or proposed sponsorship deal.
+class ClubSponsorship {
+  ClubSponsorship({
+    required this.sponsorshipId,
+    required this.type,
+    required this.teamId,
+    required this.sponsorId,
+    required this.sponsorName,
+    required this.seasonId,
+    required this.baseReward,
+    required this.weeklyReward,
+    required this.target,
+    required this.bonusPrize,
+    required this.status,
+    required this.extraData,
+  });
+
+  final int sponsorshipId;
+  final int type; // 1 = Main Kit, 2 = Stadium, 3 = Sleeve
+  final int teamId;
+  final int sponsorId;
+  final String sponsorName;
+  final int seasonId;
+  final int baseReward; // Upfront signing bonus
+  final int weeklyReward;
+  final int target; // League position target (e.g. 1 = Champion, 4 = Top 4)
+  final int bonusPrize;
+  final int status; // 1 = active, 0 = expired
+  final String extraData;
+
+  String get typeLabel => switch (type) {
+    1 => 'Main Shirt Sponsor',
+    2 => 'Stadium Sponsor',
+    3 => 'Sleeve Sponsor',
+    _ => 'Official Partner',
+  };
+
+  factory ClubSponsorship.fromMap(Map<String, Object?> m) => ClubSponsorship(
+    sponsorshipId: (m['sponsorship_id'] as int?) ?? 0,
+    type: (m['type'] as int?) ?? 1,
+    teamId: (m['team_id'] as int?) ?? 0,
+    sponsorId: (m['sponsor_id'] as int?) ?? 1,
+    sponsorName: (m['sponsor_name'] as String?) ??
+        (m['extra_data'] as String?) ??
+        'Sponsor',
+    seasonId: (m['season_id'] as int?) ?? 0,
+    baseReward: (m['base_reward'] as int?) ?? 0,
+    weeklyReward: (m['progress'] as int?) ?? 0,
+    target: (m['target'] as int?) ?? 4,
+    bonusPrize: (m['is_unique_prize'] as int?) ?? 0,
+    status: (m['status'] as int?) ?? 1,
+    extraData: (m['extra_data'] as String?) ?? '',
+  );
+}
+
+/// A hired scout that can be deployed to uncover wonderkids.
+class Scout {
+  Scout({
+    required this.scoutId,
+    required this.teamId,
+    required this.name,
+    required this.stars,
+    required this.region,
+    required this.salary,
+    required this.status,
+    this.returnDate,
+    this.lastReport,
+  });
+
+  final int scoutId;
+  final int teamId;
+  final String name;
+  final int stars; // 1 to 5 stars
+  final String? region;
+  final int salary;
+  final String status; // 'idle', 'scouting'
+  final String? returnDate;
+  final String? lastReport;
+
+  bool get isScouting => status == 'scouting';
+
+  factory Scout.fromMap(Map<String, Object?> m) => Scout(
+    scoutId: m['scout_id'] as int,
+    teamId: m['team_id'] as int,
+    name: m['name'] as String? ?? 'Scout',
+    stars: (m['stars'] as int?) ?? 1,
+    region: m['region'] as String?,
+    salary: (m['salary'] as int?) ?? 5000,
+    status: (m['status'] as String?) ?? 'idle',
+    returnDate: m['return_date'] as String?,
+    lastReport: m['last_report'] as String?,
+  );
+}
+
+/// A scouted wonderkid prospect waiting to be signed.
+class ScoutWonderkid {
+  ScoutWonderkid({
+    required this.reportId,
+    required this.teamId,
+    required this.scoutId,
+    required this.scoutName,
+    required this.region,
+    required this.date,
+    required this.playerName,
+    required this.age,
+    required this.positionId,
+    required this.power,
+    required this.potential,
+    required this.value,
+    required this.countryId,
+    required this.signed,
+  });
+
+  final int reportId;
+  final int teamId;
+  final int scoutId;
+  final String scoutName;
+  final String region;
+  final String date;
+  final String playerName;
+  final int age;
+  final int positionId;
+  final int power;
+  final int potential;
+  final int value;
+  final int countryId;
+  final bool signed;
+
+  factory ScoutWonderkid.fromMap(Map<String, Object?> m) => ScoutWonderkid(
+    reportId: m['report_id'] as int,
+    teamId: m['team_id'] as int,
+    scoutId: m['scout_id'] as int,
+    scoutName: m['scout_name'] as String? ?? 'Scout',
+    region: m['region'] as String? ?? '',
+    date: m['date'] as String? ?? '',
+    playerName: m['player_name'] as String? ?? 'Wonderkid',
+    age: (m['age'] as int?) ?? 17,
+    positionId: (m['position_id'] as int?) ?? 1,
+    power: (m['power'] as int?) ?? 65,
+    potential: (m['potential'] as int?) ?? 85,
+    value: (m['value'] as int?) ?? 1000000,
+    countryId: (m['country_id'] as int?) ?? 141,
+    signed: (m['signed'] as int? ?? 0) == 1,
   );
 }
 

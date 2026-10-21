@@ -127,9 +127,78 @@ class AppDatabase {
         proposed_duration_years INTEGER,
         created_date TEXT NOT NULL,
         updated_date TEXT,
-        message_id INTEGER
+        message_id INTEGER,
+        is_loan INTEGER NOT NULL DEFAULT 0
       )
     ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${t.academyProspects} (
+        prospect_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        team_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        age INTEGER NOT NULL DEFAULT 17,
+        position_id INTEGER NOT NULL,
+        power INTEGER NOT NULL,
+        potential INTEGER NOT NULL,
+        stars INTEGER NOT NULL DEFAULT 0,
+        profile TEXT NOT NULL DEFAULT 'D',
+        height INTEGER NOT NULL DEFAULT 178,
+        country_id INTEGER NOT NULL,
+        created_date TEXT NOT NULL,
+        signed INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${t.scouts} (
+        scout_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        team_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        stars INTEGER NOT NULL,
+        region TEXT,
+        salary INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'idle',
+        return_date TEXT,
+        last_report TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${t.scoutReports} (
+        report_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        team_id INTEGER NOT NULL,
+        scout_id INTEGER NOT NULL,
+        scout_name TEXT NOT NULL,
+        region TEXT NOT NULL,
+        date TEXT NOT NULL,
+        player_name TEXT NOT NULL,
+        age INTEGER NOT NULL,
+        position_id INTEGER NOT NULL,
+        power INTEGER NOT NULL,
+        potential INTEGER NOT NULL,
+        value INTEGER NOT NULL,
+        country_id INTEGER NOT NULL,
+        signed INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      INSERT OR IGNORE INTO ${t.tournaments} (
+        tournament_id, name, division_id, status, organization, rounds,
+        play_days, slots, points, promotion_slots, relegation_spots,
+        prize_teams, prize_top_scorer, prize_mvp
+      ) VALUES (
+        9999, 'Pre-Season Friendly', 0, 1, 4, 3,
+        '3,6', '2', 0, 0, 0, 0, 0, 0
+      )
+    ''');
+    final List<Map<String, Object?>> offerColumns = await db.rawQuery(
+      'PRAGMA table_info(${t.transferOffers})',
+    );
+    if (!offerColumns.any(
+      (Map<String, Object?> column) => column['name'] == 'is_loan',
+    )) {
+      await db.execute(
+        'ALTER TABLE ${t.transferOffers} ADD COLUMN is_loan INTEGER NOT NULL DEFAULT 0',
+      );
+    }
     final List<Map<String, Object?>> academyColumns = await db.rawQuery(
       'PRAGMA table_info(${t.teamYouthAcademy})',
     );

@@ -283,16 +283,79 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
                 style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
-              Text(
-                'One 17-year-old prospect graduates at the start of every new season.',
-                style: const TextStyle(fontSize: 12, color: AppTheme.textDim),
+              const Text(
+                '5–9 prospects scouted every 3 in-game months. You choose who joins the squad.',
+                style: TextStyle(fontSize: 12, color: AppTheme.textDim),
               ),
               const SizedBox(height: 16),
-              Text('Expected graduate: OVR $minOverall–$maxOverall',
-                style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(
+                'Expected prospect OVR: $minOverall–$maxOverall',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
               const SizedBox(height: 4),
-              Text('Higher levels also improve potential.',
-                style: const TextStyle(fontSize: 12, color: AppTheme.textDim)),
+              const Text(
+                'Higher academy levels yield higher overall and potential.',
+                style: TextStyle(fontSize: 12, color: AppTheme.textDim),
+              ),
+              const SizedBox(height: 20),
+              FutureBuilder<List<YouthProspect>>(
+                future: context.read<CareerProvider>().pendingProspects(),
+                builder: (BuildContext context, AsyncSnapshot<List<YouthProspect>> snap) {
+                  final List<YouthProspect> pending = snap.data ?? <YouthProspect>[];
+                  if (pending.isEmpty) {
+                    return Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceCard,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Row(
+                        children: <Widget>[
+                          Icon(Icons.hourglass_empty, size: 16, color: AppTheme.textDim),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'No pending intake prospects. Next batch arrives in ~3 months.',
+                              style: TextStyle(fontSize: 11, color: AppTheme.textDim),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                  return Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppTheme.accent.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      children: <Widget>[
+                        const Icon(Icons.stars, color: AppTheme.accent, size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            '${pending.length} prospects awaiting review!',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.accent,
+                            ),
+                          ),
+                        ),
+                        FilledButton.tonal(
+                          onPressed: () => _showAcademyProspectsSheet(context),
+                          style: FilledButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          child: const Text('Review'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
               const Spacer(),
               SizedBox(
                 width: double.infinity,
@@ -306,6 +369,119 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
               ),
             ],
           ),
+        );
+      },
+    );
+  }
+
+  void _showAcademyProspectsSheet(BuildContext context) {
+    final CareerProvider game = context.read<CareerProvider>();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext sheetContext) {
+        return StatefulBuilder(
+          builder: (BuildContext _, void Function(void Function()) setSheetState) {
+            return Container(
+              height: MediaQuery.of(sheetContext).size.height * 0.75,
+              decoration: const BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade700,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Youth Academy Prospects',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Promote the prospects you want into your squad.',
+                    style: TextStyle(fontSize: 11, color: AppTheme.textDim),
+                  ),
+                  const Divider(height: 20),
+                  Expanded(
+                    child: FutureBuilder<List<YouthProspect>>(
+                      future: game.pendingProspects(),
+                      builder: (BuildContext _, AsyncSnapshot<List<YouthProspect>> snap) {
+                        if (!snap.hasData) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+                        final List<YouthProspect> list = snap.data!;
+                        if (list.isEmpty) {
+                          return const Center(
+                            child: Text(
+                              'All prospects have been signed or reviewed.',
+                              style: TextStyle(color: AppTheme.textDim),
+                            ),
+                          );
+                        }
+                        return ListView.builder(
+                          itemCount: list.length,
+                          itemBuilder: (BuildContext _, int i) {
+                            final YouthProspect p = list[i];
+                            return Card(
+                              child: ListTile(
+                                leading: PositionBadge(
+                                  positionId: p.positionId,
+                                  profile: p.profile,
+                                ),
+                                title: Text(
+                                  '${p.name}  ${p.power}',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '17y · POT ${p.potential} · Foot ${p.profile == 'I' ? 'L' : 'R'}',
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                                trailing: FilledButton(
+                                  style: FilledButton.styleFrom(
+                                    visualDensity: VisualDensity.compact,
+                                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                                  ),
+                                  onPressed: () async {
+                                    final Player? signed =
+                                        await game.signYouthProspect(p.prospectId);
+                                    if (signed != null && context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('${signed.name} joined your squad!'),
+                                        ),
+                                      );
+                                      setSheetState(() {});
+                                      setState(() {});
+                                    }
+                                  },
+                                  child: const Text('Sign'),
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
@@ -509,8 +685,182 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
             'Transfer totals include all seasons.',
             style: TextStyle(fontSize: 11, color: AppTheme.textDim),
           ),
+          const Divider(height: 28),
+          Row(
+            children: <Widget>[
+              const Text(
+                'Sponsorship Deals',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () => _showSponsorDealsSheet(context),
+                icon: const Icon(Icons.handshake_outlined, size: 16),
+                label: const Text('Manage Deals'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          FutureBuilder<List<ClubSponsorship>>(
+            future: context.read<CareerProvider>().activeSponsorships(),
+            builder: (BuildContext context, AsyncSnapshot<List<ClubSponsorship>> snap) {
+              final List<ClubSponsorship> sponsors = snap.data ?? <ClubSponsorship>[];
+              if (sponsors.isEmpty) {
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceCard,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text(
+                    'No active sponsors. Tap "Manage Deals" to sign corporate sponsors for extra revenue!',
+                    style: TextStyle(fontSize: 11, color: AppTheme.textDim),
+                  ),
+                );
+              }
+              return Column(
+                children: <Widget>[
+                  for (final ClubSponsorship s in sponsors)
+                    Card(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      child: ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.verified, color: AppTheme.accent, size: 20),
+                        title: Text(s.sponsorName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        subtitle: Text('${s.typeLabel} · Target: Top ${s.target}', style: const TextStyle(fontSize: 11)),
+                        trailing: Text(
+                          '+${money(s.weeklyReward)}/w',
+                          style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
         ],
       ),
+    );
+  }
+
+  void _showSponsorDealsSheet(BuildContext context) {
+    final CareerProvider game = context.read<CareerProvider>();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext sheetContext) {
+        return StatefulBuilder(
+          builder: (BuildContext _, void Function(void Function()) setSheetState) {
+            return Container(
+              height: MediaQuery.of(sheetContext).size.height * 0.75,
+              decoration: const BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade700,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Available Sponsorship Offers',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Sign sponsor contracts to earn immediate signing bonuses, weekly income, and target incentives.',
+                    style: TextStyle(fontSize: 11, color: AppTheme.textDim),
+                  ),
+                  const Divider(height: 20),
+                  Expanded(
+                    child: FutureBuilder<List<ClubSponsorship>>(
+                      future: game.availableSponsorshipOffers(),
+                      builder: (BuildContext _, AsyncSnapshot<List<ClubSponsorship>> snap) {
+                        if (!snap.hasData) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+                        final List<ClubSponsorship> offers = snap.data!;
+                        if (offers.isEmpty) {
+                          return const Center(
+                            child: Text(
+                              'All sponsorship slots are currently filled for this season!',
+                              style: TextStyle(color: AppTheme.textDim),
+                            ),
+                          );
+                        }
+                        return ListView.builder(
+                          itemCount: offers.length,
+                          itemBuilder: (BuildContext _, int i) {
+                            final ClubSponsorship offer = offers[i];
+                            return Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Row(
+                                      children: <Widget>[
+                                        const Icon(Icons.business, color: AppTheme.accent),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          offer.sponsorName,
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                        ),
+                                        const Spacer(),
+                                        Text(
+                                          offer.typeLabel,
+                                          style: const TextStyle(fontSize: 11, color: AppTheme.textDim),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text('Upfront signing bonus: ${money(offer.baseReward)}', style: const TextStyle(fontSize: 12)),
+                                    Text('Weekly reward: +${money(offer.weeklyReward)}/week', style: const TextStyle(fontSize: 12, color: AppTheme.accent)),
+                                    Text('Target bonus: ${money(offer.bonusPrize)} (Top ${offer.target} finish)', style: const TextStyle(fontSize: 12)),
+                                    const SizedBox(height: 10),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: FilledButton(
+                                        onPressed: () async {
+                                          await game.signSponsorship(offer);
+                                          if (context.mounted) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text('Signed deal with ${offer.sponsorName}! Received ${money(offer.baseReward)} upfront.')),
+                                            );
+                                            setSheetState(() {});
+                                            setState(() => _reload());
+                                          }
+                                        },
+                                        child: Text('Sign Deal (+${money(offer.baseReward)})'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 

@@ -10,8 +10,10 @@ import '../data/repositories/match_repository.dart';
 import '../data/repositories/message_repository.dart';
 import '../data/repositories/prize_repository.dart';
 import '../data/repositories/reference_repository.dart';
+import '../data/repositories/scouting_repository.dart';
 import '../data/repositories/season_repository.dart';
 import '../data/repositories/squad_repository.dart';
+import '../data/repositories/sponsorship_repository.dart';
 import '../data/repositories/transfer_repository.dart';
 import 'formation.dart';
 import 'match_engine.dart';
@@ -34,6 +36,8 @@ class CareerService {
     required SeasonGenerator generator,
     PrizeRepository? prizes,
     TransferRepository? transfers,
+    SponsorshipRepository? sponsorships,
+    ScoutingRepository? scouting,
     Random? random,
     this.marketTickChance = 0.45,
   }) : _refs = refs,
@@ -43,6 +47,8 @@ class CareerService {
        _messages = messages,
        _prizes = prizes,
        _transfers = transfers,
+       _sponsorships = sponsorships,
+       _scouting = scouting,
        _engine = engine,
        _gen = generator,
        _rng = random ?? Random();
@@ -55,6 +61,8 @@ class CareerService {
   final MessageRepository _messages;
   final PrizeRepository? _prizes;
   final TransferRepository? _transfers;
+  final SponsorshipRepository? _sponsorships;
+  final ScoutingRepository? _scouting;
   final MatchEngine _engine;
   final SeasonGenerator _gen;
   final Random _rng;
@@ -345,34 +353,94 @@ class CareerService {
       <Object?>[t.statusActive, seasonId],
     );
     await _matchRepo.paySalaries(seasonId);
+    if (_sponsorships != null) {
+      await _sponsorships.payWeekly(userTeamId, seasonId);
+    }
+    if (_scouting != null) {
+      final List<Scout> hired = await _scouting.hiredScouts(userTeamId);
+      final int scoutWages = hired.fold<int>(
+        0,
+        (int sum, Scout s) => sum + s.salary,
+      );
+      if (scoutWages > 0) {
+        await db.execute(
+          'UPDATE teams SET budget = MAX(0, budget - ?) WHERE team_id = ?',
+          <Object?>[scoutWages, userTeamId],
+        );
+      }
+    }
     await db.execute('UPDATE teams SET budget = MAX(budget, 20000)');
-    await _runYouthAcademy(userTeamId);
+    await _runYouthAcademy(userTeamId, seasonId);
     await _runMarketAi(userTeamId);
   }
 
   /// Academy graduates arrive every three in-game months.
-  Future<void> _runYouthAcademy(int userTeamId) async {
+  Future<void> _runYouthAcademy(int userTeamId, int seasonId) async {
     final List<Map<String, Object?>> rows = await db.rawQuery(
       '''
       SELECT MAX(date) AS last_date FROM matches
-      WHERE season_id = (SELECT MAX(season_id) FROM seasons) AND date IS NOT NULL
+      WHERE season_id = ? AND status = ? AND date IS NOT NULL
     ''',
+      <Object?>[seasonId, t.matchFinished],
     );
-    final String? date = rows.isEmpty
+    String? date = rows.isEmpty
         ? null
         : rows.first['last_date'] as String?;
+    if (date == null) {
+      final List<Map<String, Object?>> minRows = await db.rawQuery(
+        'SELECT MIN(date) AS first_date FROM matches WHERE season_id = ? AND date IS NOT NULL',
+        <Object?>[seasonId],
+      );
+      date = minRows.isEmpty ? null : minRows.first['first_date'] as String?;
+    }
     if (date == null) return;
-    final List<Player> graduates = await _squads.graduateYouthPlayersIfDue(
+    final List<YouthProspect> graduates =
+        await _squads.graduateYouthPlayersIfDue(
       teamId: userTeamId,
       date: date,
     );
     if (graduates.isEmpty) return;
     await _messages.insert(
-      title: 'Youth Academy: ${graduates.length} new prospects',
-      body: '${graduates.length} academy players joined your squad:\n'
-          '${graduates.map((Player p) => '${p.name} (OVR ${p.power}/POT ${p.potential})').join('\n')}',
+      title: 'Youth Academy Intake: ${graduates.length} new prospects',
+      body: 'Our youth academy has scouted ${graduates.length} new prospects. '
+          'Review their profiles and decide which ones to promote to your squad.',
       teamId: userTeamId,
       sender: 'Youth Academy',
+    );
+  }
+
+  /// Finds one interested AI club when the manager lists a player for loan.
+  Future<void> requestLoanOffer({
+    required int userTeamId,
+    required Player player,
+  }) async {
+    final TransferRepository? transfers = _transfers;
+    if (transfers == null) return;
+    final List<Team> candidates = (await _registeredClubs())
+        .where((Team team) => team.teamId != userTeamId)
+        .toList();
+    if (candidates.isEmpty) return;
+
+    final Team borrower = candidates[_rng.nextInt(candidates.length)];
+    final int loanFee = max(
+      25000,
+      (player.value * (0.06 + _rng.nextDouble() * 0.08)).round(),
+    );
+    final int offerId = await transfers.createOffer(
+      playerId: player.playerId,
+      fromTeamId: userTeamId,
+      toTeamId: borrower.teamId,
+      offerAmount: loanFee,
+      playerValue: player.value,
+      isLoan: true,
+    );
+    await _messages.insert(
+      title: 'Loan offer: ${player.name}',
+      body: '${borrower.name} wants to take ${player.name} on loan for the season. '
+          'They offer a loan fee of ${_money(loanFee)} and will cover his wages.',
+      teamId: userTeamId,
+      sender: borrower.name,
+      transferOfferId: offerId,
     );
   }
 
@@ -965,6 +1033,56 @@ class CareerService {
       userTeamId: userTeamId,
     );
 
+    if (_sponsorships != null) {
+      onProgress('Evaluating sponsor objectives...');
+      int userRank = 0;
+      for (final Tournament tour in tournaments) {
+        if (!tour.isLeague) continue;
+        final List<StandingRow> table = await _seasons.standings(
+          current.seasonId,
+          tour.tournamentId,
+        );
+        final int idx = table.indexWhere((StandingRow r) => r.teamId == userTeamId);
+        if (idx != -1) userRank = idx + 1;
+      }
+      final List<String> sponsorBonuses = await _sponsorships.evaluateSeasonTargets(
+        teamId: userTeamId,
+        seasonId: current.seasonId,
+        finalLeagueRank: userRank,
+      );
+      for (final String msg in sponsorBonuses) {
+        await _messages.insert(
+          title: 'Sponsorship Bonus Paid!',
+          body: msg,
+          teamId: userTeamId,
+          sender: 'Commercial Department',
+        );
+      }
+    }
+
+    onProgress('Recalling loaned players...');
+    final List<Map<String, Object?>> loans = await db.query(t.teamLoans);
+    for (final Map<String, Object?> loan in loans) {
+      final int pid = loan['player_id'] as int;
+      final int parentId = loan['from_team_id'] as int;
+      await db.update(
+        t.teamPlayers,
+        <String, Object?>{'team_id': parentId},
+        where: 'player_id = ?',
+        whereArgs: <Object?>[pid],
+      );
+      await db.update(
+        t.players,
+        <String, Object?>{
+          'market_status': t.marketActive,
+          'squad_status': t.squadReserve,
+        },
+        where: 'player_id = ?',
+        whereArgs: <Object?>[pid],
+      );
+    }
+    await db.delete(t.teamLoans);
+
     onProgress('Archiving season stats...');
     for (final Tournament tour in tournaments) {
       await _seasons.archiveSeasonTournament(
@@ -1006,6 +1124,15 @@ class CareerService {
       cup: nextCup,
       internationals: await _refs.internationalCups(userTeam.countryId),
       startYear: current.startYear + 1,
+    );
+    final List<Team> seasonClubs = await _registeredClubs();
+    final Map<int, Team> clubsMap = <int, Team>{
+      for (final Team c in seasonClubs) c.teamId: c,
+    };
+    await _gen.schedulePreSeasonFriendlies(
+      seasonId: plan.season.seasonId,
+      userTeamId: userTeamId,
+      allTeams: clubsMap,
     );
     await _messages.insert(
       title: plan.season.name,

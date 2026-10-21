@@ -70,7 +70,9 @@ class _FixturesTabState extends State<FixturesTab> {
           ? 'Group ${String.fromCharCode(64 + m.groupId!)} · '
                 'Matchday ${m.round}'
           : knockoutRoundName(m.phase, totalRounds[m.tournamentId] ?? 1);
-      final String key = isLeague
+      final String key = m.tournamentId == 9999
+          ? 'Pre-Season Friendly · Match ${m.round}'
+          : isLeague
           ? '${game.league?.name ?? 'League'} · Round ${m.round}'
           : '${tournamentNames[m.tournamentId] ?? 'Cup'} · $stage';
       groups.putIfAbsent(key, () => <FixtureMatch>[]).add(m);

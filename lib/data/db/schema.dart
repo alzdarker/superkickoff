@@ -14,8 +14,11 @@ const String teamTactics = 'team_tactics';
 const String teamLineups = 'team_lineups';
 const String teamTraining = 'team_training';
 const String teamYouthAcademy = 'team_youth_academy';
+const String academyProspects = 'academy_prospects';
 const String competitionPrizeRules = 'competition_prize_rules';
 const String competitionPrizeAwards = 'competition_prize_awards';
+const String scouts = 'scouts';
+const String scoutReports = 'scout_reports';
 const String teamLoans = 'team_loans';
 const String countryCoaches = 'country_coaches';
 const String countryCallups = 'country_callups';
@@ -65,6 +68,7 @@ const int matchCancelled = 3;
 const int orgLeague = 1;
 const int orgInternational = 2;
 const int orgNationalCup = 3;
+const int orgFriendly = 4;
 
 // ------------------------------------------------ season tournament state
 const int seasonTournamentActive = 1;

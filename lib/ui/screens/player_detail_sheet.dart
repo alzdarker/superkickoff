@@ -282,10 +282,10 @@ class _PlayerDetailSheetState extends State<PlayerDetailSheet>
                   _info(
                     'Squad role',
                     p.squadStatus == t.squadFirstTeam
-                        ? 'First team'
+                        ? 'Pemain Inti (First team)'
                         : p.squadStatus == t.squadLoanListed
-                        ? 'Loan listed'
-                        : 'Reserve',
+                        ? 'Daftar Pinjaman (Loan listed)'
+                        : 'Cadangan (Reserve)',
                     width,
                   ),
                   _info(

@@ -31,16 +31,24 @@ void main() {
       isEmpty,
     );
 
-    final List<Player> graduates = await squads.graduateYouthPlayersIfDue(
+    final List<YouthProspect> graduates = await squads.graduateYouthPlayersIfDue(
       teamId: 42,
       date: '2026-04-05',
     );
     expect(graduates.length, inInclusiveRange(5, 9));
-    for (final Player player in graduates) {
+    for (final YouthProspect player in graduates) {
       expect(player.age, 17);
       expect(player.name, isNot(startsWith('Academy Prospect')));
       expect(player.power, inInclusiveRange(46, 49));
     }
+    // Sign one prospect and verify they join the squad
+    final Player? signed = await squads.signProspect(graduates.first.prospectId);
+    expect(signed, isNotNull);
+    expect(signed!.name, graduates.first.name);
+
+    final List<Player> squad = await squads.squadForTeam(42);
+    expect(squad.any((Player p) => p.playerId == signed.playerId), isTrue);
+
     expect(
       await squads.graduateYouthPlayersIfDue(teamId: 42, date: '2026-05-01'),
       isEmpty,

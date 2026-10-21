@@ -25,6 +25,8 @@ class _SquadTabState extends State<SquadTab> {
   List<SquadStatRow>? stats;
   Map<int, int> suspensions = <int, int>{};
   int _loadedWeek = -1;
+  String _sortBy = 'power';
+  bool _sortDescending = true;
 
   @override
   void didChangeDependencies() {
@@ -96,15 +98,92 @@ class _SquadTabState extends State<SquadTab> {
     );
   }
 
+  List<Player> _getSortedPlayers(List<Player> source) {
+    final List<Player> list = List<Player>.from(source);
+    list.sort((Player a, Player b) {
+      int cmp = 0;
+      switch (_sortBy) {
+        case 'power':
+          cmp = a.power.compareTo(b.power);
+          break;
+        case 'value':
+          cmp = a.value.compareTo(b.value);
+          break;
+        case 'age':
+          cmp = a.age.compareTo(b.age);
+          break;
+        case 'position':
+          cmp = a.positionId.compareTo(b.positionId);
+          break;
+      }
+      return _sortDescending ? -cmp : cmp;
+    });
+    return list;
+  }
+
   Widget _squadList(CareerProvider game, List<Player> players) {
-    return RefreshIndicator(
-      onRefresh: _reload,
-      child: ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: players.length,
-        itemBuilder: (BuildContext context, int index) =>
-            _playerTile(context, game, players[index]),
-      ),
+    final List<Player> sorted = _getSortedPlayers(players);
+    return Column(
+      children: <Widget>[
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          color: AppTheme.surfaceCard,
+          child: Row(
+            children: <Widget>[
+              Text(
+                '${sorted.length} players',
+                style: const TextStyle(fontSize: 11, color: AppTheme.textDim),
+              ),
+              const Spacer(),
+              const Text(
+                'Sort: ',
+                style: TextStyle(fontSize: 11, color: AppTheme.textDim),
+              ),
+              DropdownButton<String>(
+                value: _sortBy,
+                isDense: true,
+                underline: const SizedBox.shrink(),
+                dropdownColor: AppTheme.surfaceCard,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+                items: const <DropdownMenuItem<String>>[
+                  DropdownMenuItem<String>(value: 'power', child: Text('Overall')),
+                  DropdownMenuItem<String>(value: 'value', child: Text('MV')),
+                  DropdownMenuItem<String>(value: 'age', child: Text('Age')),
+                  DropdownMenuItem<String>(value: 'position', child: Text('Position')),
+                ],
+                onChanged: (String? val) {
+                  if (val != null) setState(() => _sortBy = val);
+                },
+              ),
+              IconButton(
+                icon: Icon(
+                  _sortDescending ? Icons.arrow_downward : Icons.arrow_upward,
+                  size: 16,
+                  color: AppTheme.accent,
+                ),
+                tooltip: _sortDescending ? 'Highest first' : 'Lowest first',
+                onPressed: () => setState(() => _sortDescending = !_sortDescending),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _reload,
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              itemCount: sorted.length,
+              itemBuilder: (BuildContext context, int index) =>
+                  _playerTile(context, game, sorted[index]),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -802,16 +881,17 @@ class _SquadTabState extends State<SquadTab> {
   }
 
   Widget _playerTile(BuildContext context, CareerProvider game, Player p) {
-    final String statusLabel = switch (p.squadStatus) {
-      t.squadFirstTeam => 'XI',
-      t.squadReserve => 'Res',
-      _ => 'Loan',
-    };
-    final Color statusColor = switch (p.squadStatus) {
-      t.squadFirstTeam => AppTheme.accent,
-      t.squadReserve => AppTheme.textDim,
-      _ => AppTheme.warn,
-    };
+    final bool inStartingLineup = game.lineup.values.contains(p.playerId);
+    final String roleLabel = p.squadStatus == t.squadFirstTeam
+        ? (inStartingLineup ? 'Pemain Inti (XI)' : 'Pemain Inti')
+        : p.squadStatus == t.squadLoanListed
+        ? 'Daftar Pinjaman'
+        : 'Cadangan';
+    final Color roleColor = p.squadStatus == t.squadFirstTeam
+        ? AppTheme.accent
+        : p.squadStatus == t.squadLoanListed
+        ? AppTheme.warn
+        : AppTheme.textDim;
     return Card(
       child: ListTile(
         onTap: () async {
@@ -855,6 +935,14 @@ class _SquadTabState extends State<SquadTab> {
               const SizedBox(width: 6),
               const Text('🛒', style: TextStyle(fontSize: 11)),
             ],
+            if (p.squadStatus == t.squadLoanListed) ...<Widget>[
+              const SizedBox(width: 6),
+              const Text('📋', style: TextStyle(fontSize: 11)),
+            ],
+            if (p.marketStatus == t.marketOnLoan) ...<Widget>[
+              const SizedBox(width: 6),
+              const Text('✈️', style: TextStyle(fontSize: 11)),
+            ],
           ],
         ),
         subtitle: Wrap(
@@ -862,9 +950,21 @@ class _SquadTabState extends State<SquadTab> {
           runSpacing: 2,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: <Widget>[
-            Text(
-              statusLabel,
-              style: TextStyle(fontSize: 10, color: statusColor),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+              decoration: BoxDecoration(
+                color: roleColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: roleColor.withValues(alpha: 0.4)),
+              ),
+              child: Text(
+                roleLabel,
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  color: roleColor,
+                ),
+              ),
             ),
             if ((suspensions[p.playerId] ?? 0) > 0)
               Container(
@@ -909,6 +1009,9 @@ class _SquadTabState extends State<SquadTab> {
                   case 'market':
                     await game.toggleListedForSale(p);
                     break;
+                  case 'loan':
+                    await game.toggleListedForLoan(p);
+                    break;
                 }
                 await _reload();
               },
@@ -925,8 +1028,16 @@ class _SquadTabState extends State<SquadTab> {
                   value: 'market',
                   child: Text(
                     p.marketStatus == t.marketForSale
-                        ? 'Remove from market'
+                        ? 'Remove from transfer list'
                         : 'List for sale',
+                  ),
+                ),
+                PopupMenuItem<String>(
+                  value: 'loan',
+                  child: Text(
+                    p.squadStatus == t.squadLoanListed
+                        ? 'Remove from loan list'
+                        : 'List for loan',
                   ),
                 ),
               ],
