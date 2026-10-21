@@ -446,8 +446,11 @@ class CompetitionStats {
     required this.assists,
     required this.cleanSheets,
     required this.rated,
+    this.region = '',
   });
 
+  /// Continental zone of the league's country (europe, asia, ...), '' if none.
+  final String region;
   final List<StandingRow> standings;
   final List<GroupTable> groups;
   final List<LeaderRow> scorers;
@@ -717,14 +720,15 @@ class YouthAcademyState {
 
 class TrainingState {
   const TrainingState({
-    required this.usedThisMatchday,
+    required this.doneFocuses,
     required this.sessions,
     required this.matchesPlayed,
     required this.cost,
     required this.eligible,
   });
 
-  final bool usedThisMatchday;
+  /// Focus keys already trained on this matchday; each can run once.
+  final Set<String> doneFocuses;
   final int sessions;
   final int matchesPlayed;
   final int cost;
@@ -1131,4 +1135,48 @@ class ClubHistory {
   final List<PlayerAward> awards;
 
   bool get isEmpty => seasons.isEmpty && awards.isEmpty;
+}
+
+/// One story in the News menu. [scope] is 'world', 'region' or 'league';
+/// [importance] runs 1 (filler) to 5 (front page).
+class NewsItem {
+  const NewsItem({
+    required this.ref,
+    required this.seasonId,
+    required this.date,
+    required this.scope,
+    required this.category,
+    required this.headline,
+    required this.body,
+    this.importance = 1,
+    this.teamId,
+    this.playerId,
+    this.newsId = 0,
+  });
+
+  final int newsId;
+  final String ref;
+  final int seasonId;
+  final String date;
+  final String scope;
+  final String category;
+  final String headline;
+  final String body;
+  final int importance;
+  final int? teamId;
+  final int? playerId;
+
+  factory NewsItem.fromMap(Map<String, Object?> m) => NewsItem(
+    newsId: m['news_id'] as int,
+    ref: m['ref'] as String,
+    seasonId: m['season_id'] as int,
+    date: m['date'] as String,
+    scope: m['scope'] as String,
+    category: m['category'] as String,
+    headline: m['headline'] as String,
+    body: m['body'] as String,
+    importance: (m['importance'] as int?) ?? 1,
+    teamId: m['team_id'] as int?,
+    playerId: m['player_id'] as int?,
+  );
 }

@@ -460,6 +460,18 @@ class _SquadTabState extends State<SquadTab> {
                       ),
                     ),
                     const Spacer(),
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      onPressed: () => game.autoFillLineup(),
+                      icon: const Icon(Icons.auto_fix_high, size: 15),
+                      label: const Text('Auto XI'),
+                    ),
                     TextButton(
                       onPressed: game.lineup.isEmpty
                           ? null
@@ -477,9 +489,9 @@ class _SquadTabState extends State<SquadTab> {
                   ],
                 ),
                 const Text(
-                  'Hold a player, then drag onto a pitch slot. Drag a starter '
-                  'to the bench to remove him. Empty slots auto-fill with the '
-                  'best available player.',
+                  'Auto XI picks the best player for every slot. To adjust, hold a '
+                  'player and drag onto a pitch slot; drag a starter to the '
+                  'bench to remove him.',
                   style: TextStyle(fontSize: 10, color: AppTheme.textDim),
                 ),
               ],

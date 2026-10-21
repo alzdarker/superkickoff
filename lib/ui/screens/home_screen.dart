@@ -10,6 +10,7 @@ import 'inbox_tab.dart';
 import 'knockout_bracket_sheet.dart';
 import 'club_hub_sheet.dart';
 import 'market_tab.dart';
+import 'news_tab.dart';
 import 'match_screen.dart';
 import 'matchday_results_sheet.dart';
 import 'squad_tab.dart';
@@ -69,6 +70,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: const TextStyle(fontSize: 10),
                 ),
               ),
+            ),
+            IconButton(
+              tooltip: 'Inbox',
+              icon: Badge(
+                isLabelVisible: game.unreadCount > 0,
+                label: Text('${game.unreadCount}'),
+                child: const Icon(Icons.mail_outline),
+              ),
+              onPressed: () => _openInbox(context),
             ),
             if (game.cups.isNotEmpty)
               IconButton(
@@ -133,8 +143,8 @@ class _HomeScreenState extends State<HomeScreen> {
               label: 'Table',
             ),
             const NavigationDestination(
-              icon: Icon(Icons.mail_outline),
-              label: 'Inbox',
+              icon: Icon(Icons.newspaper),
+              label: 'Berita',
             ),
             const NavigationDestination(
               icon: Icon(Icons.storefront),
@@ -145,6 +155,10 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  void _openInbox(BuildContext context) => Navigator.of(context).push(
+    MaterialPageRoute<void>(builder: (_) => const InboxScreen()),
+  );
 
   Future<void> _openBrackets(BuildContext context, CareerProvider game) async {
     final Tournament? tournament = await showModalBottomSheet<Tournament>(
@@ -218,13 +232,13 @@ class _HomeScreenState extends State<HomeScreen> {
       case 3:
         return const StandingsTab();
       case 4:
-        return const InboxTab();
+        return const NewsTab();
       case 5:
         return const MarketTab();
       default:
         return OverviewTab(
           onPlayPressed: () => _playNext(context, game),
-          onOpenInbox: () => setState(() => _index = 4),
+          onOpenInbox: () => _openInbox(context),
         );
     }
   }

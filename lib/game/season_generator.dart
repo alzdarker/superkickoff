@@ -57,23 +57,30 @@ class SeasonGenerator {
       allTeams[tm.teamId] = tm;
     }
     // Continental entrants: each country sends its top clubs by power.
-    // Clubs already invited to a bigger competition are skipped so nobody
-    // plays in two continental cups in the same season.
+    // Tiered cups (e.g. UCL/UEL/Conference or ACL Elite/Two/Challenge) exclude
+    // clubs already invited to a higher tier. Super cups and world cups do not.
     final Map<int, List<int>> internationalEntrants = <int, List<int>>{};
     final Set<int> continentalInvites = <int>{};
     for (final Tournament tour in internationals) {
+      final bool isSuperOrGlobal =
+          tour.tournamentId == 54 ||
+          tour.tournamentId == 56 ||
+          tour.tournamentId == 163 ||
+          tour.tournamentId == 1651;
       final List<Team> invited = await _internationalTeams(
         tour,
-        exclude: continentalInvites,
+        exclude: isSuperOrGlobal ? const <int>{} : continentalInvites,
         beforeSeasonId: season.seasonId,
       );
-      if (invited.length < 4) continue;
+      if (invited.length < 2) continue;
       final Map<int, Team> byId = <int, Team>{
         for (final Team tm in invited) tm.teamId: tm,
       };
       final List<int> entrants = seedByIdes(invited);
       internationalEntrants[tour.tournamentId] = entrants;
-      continentalInvites.addAll(entrants);
+      if (!isSuperOrGlobal) {
+        continentalInvites.addAll(entrants);
+      }
       for (final int id in entrants) {
         allTeams[id] = byId[id]!;
       }
@@ -175,7 +182,20 @@ class SeasonGenerator {
     required Map<int, Team> teamCache,
   }) async {
     int added = 0;
-    final Set<int> continentalInvites = <int>{};
+    // Clubs already playing a tiered continental cup must not be invited again.
+    final List<Map<String, Object?>> playing = await db.rawQuery(
+      '''
+      SELECT DISTINCT home_team_id AS id FROM matches
+      WHERE season_id = ? AND tournament_id IN (49, 51, 135, 99, 164, 1650, 52, 53, 50, 100)
+      UNION
+      SELECT DISTINCT away_team_id FROM matches
+      WHERE season_id = ? AND tournament_id IN (49, 51, 135, 99, 164, 1650, 52, 53, 50, 100)
+    ''',
+      <Object?>[season.seasonId, season.seasonId],
+    );
+    final Set<int> continentalInvites = <int>{
+      for (final Map<String, Object?> row in playing) row['id'] as int,
+    };
     for (final Tournament tour in internationals) {
       final List<Map<String, Object?>> linked = await db.query(
         t.seasonTournaments,
@@ -184,17 +204,24 @@ class SeasonGenerator {
         limit: 1,
       );
       if (linked.isNotEmpty) continue;
+      final bool isSuperOrGlobal =
+          tour.tournamentId == 54 ||
+          tour.tournamentId == 56 ||
+          tour.tournamentId == 163 ||
+          tour.tournamentId == 1651;
       final List<Team> invited = await _internationalTeams(
         tour,
-        exclude: continentalInvites,
+        exclude: isSuperOrGlobal ? const <int>{} : continentalInvites,
         beforeSeasonId: season.seasonId,
       );
-      if (invited.length < 4) continue;
+      if (invited.length < 2) continue;
       final Map<int, Team> byId = <int, Team>{
         for (final Team tm in invited) tm.teamId: tm,
       };
       final List<int> entrants = seedByIdes(invited);
-      continentalInvites.addAll(entrants);
+      if (!isSuperOrGlobal) {
+        continentalInvites.addAll(entrants);
+      }
 
       final List<Map<String, Object?>> registered = await db.query(
         t.seasonTeams,
@@ -428,6 +455,8 @@ class SeasonGenerator {
     Set<int> exclude = const <int>{},
     int? beforeSeasonId,
   }) async {
+    final _ChampionsFeed? feed = _championsFeeds[tour.tournamentId];
+    if (feed != null) return _championsOf(tour, feed, beforeSeasonId);
     final rows = await db.query(
       t.internationalSlots,
       where: 'tournament_id = ?',
@@ -449,6 +478,118 @@ class SeasonGenerator {
       teams.addAll(picked);
     }
     return teams;
+  }
+
+  /// Super cups and world cups are contested by continental champions.
+  static const Map<int, _ChampionsFeed> _championsFeeds = <int, _ChampionsFeed>{
+    54: _ChampionsFeed(<int>[49, 51], 2), // UEFA Super Cup
+    1651: _ChampionsFeed(<int>[99, 164], 2), // AFC Super Cup
+    56: _ChampionsFeed(<int>[49, 52, 50, 99, 100, 51, 53, 164], 8),
+    163: _ChampionsFeed(
+      <int>[49, 52, 99, 50, 100, 51, 53, 164, 135, 1650],
+      16,
+    ),
+  };
+
+  /// Champions of the feeder cups from the latest finished season, then
+  /// runners-up in the same order, up to the field size. Gaps (first season,
+  /// unfinished cups) are filled with the strongest clubs of the countries
+  /// that hold slots, by power - never at random.
+  Future<List<Team>> _championsOf(
+    Tournament tour,
+    _ChampionsFeed feed,
+    int? beforeSeasonId,
+  ) async {
+    final List<int> champions = <int>[];
+    final List<int> runnersUp = <int>[];
+    if (beforeSeasonId != null) {
+      for (final int cupId in feed.cups) {
+        final (int, int)? finalists = await _lastFinal(cupId, beforeSeasonId);
+        if (finalists == null) continue;
+        champions.add(finalists.$1);
+        runnersUp.add(finalists.$2);
+      }
+    }
+    final List<int> ids = <int>[];
+    for (final int id in <int>[...champions, ...runnersUp]) {
+      if (ids.length < feed.size && !ids.contains(id)) ids.add(id);
+    }
+    final List<Team> teams = <Team>[];
+    for (final int id in ids) {
+      final List<Map<String, Object?>> rows = await db.query(
+        t.teams,
+        where: 'team_id = ?',
+        whereArgs: <Object?>[id],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) teams.add(Team.fromMap(rows.first));
+    }
+    if (teams.length >= feed.size) return teams;
+
+    final List<Map<String, Object?>> slotRows = await db.query(
+      t.internationalSlots,
+      where: 'tournament_id = ?',
+      whereArgs: <Object?>[tour.tournamentId],
+    );
+    final List<Team> pool = <Team>[];
+    for (final Map<String, Object?> row in slotRows) {
+      final List<Map<String, Object?>> clubs = await db.query(
+        t.teams,
+        where: 'country_id = ? AND division = 1',
+        whereArgs: <Object?>[row['country_id']],
+        orderBy: 'power DESC',
+        limit: (row['slots'] as int?) ?? 0,
+      );
+      pool.addAll(clubs.map(Team.fromMap));
+    }
+    pool.sort((Team a, Team b) => b.power.compareTo(a.power));
+    for (final Team club in pool) {
+      if (teams.length >= feed.size) break;
+      if (teams.every((Team tm) => tm.teamId != club.teamId)) teams.add(club);
+    }
+    return teams;
+  }
+
+  /// (champion, runner-up) of the latest fully played edition of a cup before
+  /// [beforeSeasonId], or null when none has finished.
+  Future<(int, int)?> _lastFinal(int tournamentId, int beforeSeasonId) async {
+    final List<Map<String, Object?>> seasons = await db.rawQuery(
+      '''
+      SELECT MAX(season_id) AS season_id FROM matches
+      WHERE tournament_id = ? AND season_id < ?
+    ''',
+      <Object?>[tournamentId, beforeSeasonId],
+    );
+    final int? seasonId = seasons.isEmpty
+        ? null
+        : seasons.first['season_id'] as int?;
+    if (seasonId == null) return null;
+    final int open =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM matches WHERE season_id = ? '
+            'AND tournament_id = ? AND status != ?',
+            <Object?>[seasonId, tournamentId, t.matchFinished],
+          ),
+        ) ??
+        0;
+    if (open > 0) return null;
+    final List<Map<String, Object?>> rows = await db.rawQuery(
+      '''
+      SELECT home_team_id, away_team_id, winner_id FROM matches
+      WHERE season_id = ? AND tournament_id = ?
+        AND phase = (SELECT MAX(phase) FROM matches
+                     WHERE season_id = ? AND tournament_id = ?)
+        AND winner_id IS NOT NULL AND winner_id != 0
+      LIMIT 1
+    ''',
+      <Object?>[seasonId, tournamentId, seasonId, tournamentId],
+    );
+    if (rows.isEmpty) return null;
+    final int winner = rows.first['winner_id'] as int;
+    final int home = rows.first['home_team_id'] as int;
+    final int away = rows.first['away_team_id'] as int;
+    return (winner, winner == home ? away : home);
   }
 
   /// Qualification follows the latest completed domestic table when one is
@@ -694,4 +835,12 @@ List<FixtureSlot> doubleRoundRobin(List<int> teamIds, [Random? random]) {
     all.add(FixtureSlot(slot.round + half, 2, slot.away, slot.home));
   }
   return all;
+}
+
+/// Feeder cups (priority order) and field size of a champions-only cup.
+class _ChampionsFeed {
+  const _ChampionsFeed(this.cups, this.size);
+
+  final List<int> cups;
+  final int size;
 }

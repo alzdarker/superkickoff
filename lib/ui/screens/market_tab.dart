@@ -87,16 +87,22 @@ class _MarketTabState extends State<MarketTab> {
         maxAge: maxAge,
         minPrice: minPrice,
         maxPrice: maxPrice,
-        onApply: (int? newMinAge, int? newMaxAge, int? newMinPrice, int? newMaxPrice) {
-          setState(() {
-            minAge = newMinAge;
-            maxAge = newMaxAge;
-            minPrice = newMinPrice;
-            maxPrice = newMaxPrice;
-          });
-          _load();
-          _loadAllPlayers();
-        },
+        onApply:
+            (
+              int? newMinAge,
+              int? newMaxAge,
+              int? newMinPrice,
+              int? newMaxPrice,
+            ) {
+              setState(() {
+                minAge = newMinAge;
+                maxAge = newMaxAge;
+                minPrice = newMinPrice;
+                maxPrice = newMaxPrice;
+              });
+              _load();
+              _loadAllPlayers();
+            },
         onClear: () {
           setState(() {
             minAge = null;
@@ -146,9 +152,9 @@ class _MarketTabState extends State<MarketTab> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(
-              int.tryParse(offer.text.trim()),
-            ),
+            onPressed: () =>
+                Navigator.of(dialogContext)
+                    .pop(int.tryParse(offer.text.trim())),
             child: const Text('Send Offer'),
           ),
         ],
@@ -373,10 +379,7 @@ class _MarketTabState extends State<MarketTab> {
               ? const Center(child: CircularProgressIndicator())
               : allPlayers.isEmpty
               ? const Center(
-                  child: Text(
-                    'No players found.',
-                    textAlign: TextAlign.center,
-                  ),
+                  child: Text('No players found.', textAlign: TextAlign.center),
                 )
               : RefreshIndicator(
                   onRefresh: _loadAllPlayers,
@@ -442,12 +445,23 @@ class _MarketTabState extends State<MarketTab> {
                     Card(
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: AppTheme.accent.withValues(alpha: 0.15),
-                          child: const Icon(Icons.radar, color: AppTheme.accent),
+                          backgroundColor: AppTheme.accent.withValues(
+                            alpha: 0.15,
+                          ),
+                          child: const Icon(
+                            Icons.radar,
+                            color: AppTheme.accent,
+                          ),
                         ),
                         title: Row(
                           children: <Widget>[
-                            Text(scout.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            Text(
+                              scout.name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
                             const SizedBox(width: 6),
                             Stars(value: scout.stars, size: 10),
                           ],
@@ -458,19 +472,30 @@ class _MarketTabState extends State<MarketTab> {
                               : 'Ready for assignment · ${money(scout.salary)}/w',
                           style: TextStyle(
                             fontSize: 11,
-                            color: scout.isScouting ? AppTheme.accent : AppTheme.textDim,
+                            color: scout.isScouting
+                                ? AppTheme.accent
+                                : AppTheme.textDim,
                           ),
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: <Widget>[
                             FilledButton(
-                              style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
-                              onPressed: () => _deployScoutDialog(context, scout),
-                              child: Text(scout.isScouting ? 'Re-deploy' : 'Deploy'),
+                              style: FilledButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              onPressed: () =>
+                                  _deployScoutDialog(context, scout),
+                              child: Text(
+                                scout.isScouting ? 'Re-deploy' : 'Deploy',
+                              ),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.close, size: 16, color: AppTheme.textDim),
+                              icon: const Icon(
+                                Icons.close,
+                                size: 16,
+                                color: AppTheme.textDim,
+                              ),
                               tooltip: 'Release scout',
                               onPressed: () async {
                                 await game.fireScout(scout.scoutId);
@@ -493,57 +518,84 @@ class _MarketTabState extends State<MarketTab> {
           const SizedBox(height: 6),
           FutureBuilder<List<ScoutWonderkid>>(
             future: game.pendingWonderkids(),
-            builder: (BuildContext context, AsyncSnapshot<List<ScoutWonderkid>> snap) {
-              final List<ScoutWonderkid> list = snap.data ?? <ScoutWonderkid>[];
-              if (list.isEmpty) {
-                return Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceCard,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Text(
-                    'No wonderkids scouted yet. Deploy your scouts to South America, Europe, Africa, or Asia to discover talent!',
-                    style: TextStyle(fontSize: 11, color: AppTheme.textDim),
-                  ),
-                );
-              }
-              return Column(
-                children: <Widget>[
-                  for (final ScoutWonderkid w in list)
-                    Card(
-                      child: ListTile(
-                        leading: PositionBadge(positionId: w.positionId),
-                        title: Row(
-                          children: <Widget>[
-                            Text(w.playerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                            const SizedBox(width: 6),
-                            Text('OVR ${w.power}', style: const TextStyle(fontSize: 12, color: AppTheme.accent, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                        subtitle: Text(
-                          '${w.age}y · Potential ${w.potential}+ · ${w.region} (${w.scoutName})\nValue ${money(w.value)} · Fee ${money((w.value * 0.75).round())}',
-                          style: const TextStyle(fontSize: 11),
-                        ),
-                        isThreeLine: true,
-                        trailing: FilledButton(
-                          style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
-                          onPressed: () async {
-                            final String? err = await game.signWonderkid(w.reportId);
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(err ?? '${w.playerName} joined your squad!')),
-                              );
-                              setState(() {});
-                            }
-                          },
-                          child: const Text('Sign'),
-                        ),
+            builder:
+                (
+                  BuildContext context,
+                  AsyncSnapshot<List<ScoutWonderkid>> snap,
+                ) {
+                  final List<ScoutWonderkid> list =
+                      snap.data ?? <ScoutWonderkid>[];
+                  if (list.isEmpty) {
+                    return Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceCard,
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                    ),
-                ],
-              );
-            },
+                      child: const Text(
+                        'No wonderkids scouted yet. Deploy your scouts to South America, Europe, Africa, or Asia to discover talent!',
+                        style: TextStyle(fontSize: 11, color: AppTheme.textDim),
+                      ),
+                    );
+                  }
+                  return Column(
+                    children: <Widget>[
+                      for (final ScoutWonderkid w in list)
+                        Card(
+                          child: ListTile(
+                            leading: PositionBadge(positionId: w.positionId),
+                            title: Row(
+                              children: <Widget>[
+                                Text(
+                                  w.playerName,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'OVR ${w.power}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.accent,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            subtitle: Text(
+                              '${w.age}y · Potential ${w.potential}+ · ${w.region} (${w.scoutName})\nValue ${money(w.value)} · Fee ${money((w.value * 0.75).round())}',
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                            isThreeLine: true,
+                            trailing: FilledButton(
+                              style: FilledButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              onPressed: () async {
+                                final String? err = await game.signWonderkid(
+                                  w.reportId,
+                                );
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        err ??
+                                            '${w.playerName} joined your squad!',
+                                      ),
+                                    ),
+                                  );
+                                  setState(() {});
+                                }
+                              },
+                              child: const Text('Sign'),
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
           ),
         ],
       ),
@@ -594,16 +646,32 @@ class _MarketTabState extends State<MarketTab> {
                   itemCount: candidates.length,
                   itemBuilder: (BuildContext _, int i) {
                     final Scout c = candidates[i];
-                    final int fee = ScoutingRepository.hiringCostForStars(c.stars);
+                    final int fee = ScoutingRepository.hiringCostForStars(
+                      c.stars,
+                    );
                     return Card(
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: AppTheme.accent.withValues(alpha: 0.15),
-                          child: Text('${c.stars}★', style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.accent)),
+                          backgroundColor: AppTheme.accent.withValues(
+                            alpha: 0.15,
+                          ),
+                          child: Text(
+                            '${c.stars}★',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.accent,
+                            ),
+                          ),
                         ),
                         title: Row(
                           children: <Widget>[
-                            Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            Text(
+                              c.name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
                             const SizedBox(width: 6),
                             Stars(value: c.stars, size: 10),
                           ],
@@ -614,13 +682,19 @@ class _MarketTabState extends State<MarketTab> {
                         ),
                         isThreeLine: true,
                         trailing: FilledButton(
-                          style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                          style: FilledButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
                           onPressed: () async {
                             final String? err = await game.hireScout(c);
                             if (context.mounted) {
                               Navigator.pop(sheetContext);
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(err ?? '${c.name} hired as scout!')),
+                                SnackBar(
+                                  content: Text(
+                                    err ?? '${c.name} hired as scout!',
+                                  ),
+                                ),
                               );
                               setState(() {});
                             }
@@ -651,19 +725,33 @@ class _MarketTabState extends State<MarketTab> {
           children: <Widget>[
             Text('Stars: ${scout.stars}★ · Wage: ${money(scout.salary)}/week'),
             const SizedBox(height: 12),
-            const Text('Select target scouting region:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+            const Text(
+              'Select target scouting region:',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            ),
             const SizedBox(height: 8),
             for (final String region in ScoutingRepository.regions)
               ListTile(
                 dense: true,
-                leading: const Icon(Icons.travel_explore, size: 20, color: AppTheme.accent),
+                leading: const Icon(
+                  Icons.travel_explore,
+                  size: 20,
+                  color: AppTheme.accent,
+                ),
                 title: Text(region, style: const TextStyle(fontSize: 13)),
                 onTap: () async {
                   Navigator.pop(dialogContext);
-                  final List<ScoutWonderkid> found = await game.deployScout(scout, region);
+                  final List<ScoutWonderkid> found = await game.deployScout(
+                    scout,
+                    region,
+                  );
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('${scout.name} scouted $region and discovered ${found.length} wonderkids!')),
+                      SnackBar(
+                        content: Text(
+                          '${scout.name} scouted $region and discovered ${found.length} wonderkids!',
+                        ),
+                      ),
                     );
                     setState(() {});
                   }
@@ -888,7 +976,10 @@ class _FilterDrawerState extends State<_FilterDrawer> {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
-          const Text('Age', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          const Text(
+            'Age',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 8),
           Row(
             children: <Widget>[
@@ -916,7 +1007,10 @@ class _FilterDrawerState extends State<_FilterDrawer> {
             ],
           ),
           const SizedBox(height: 16),
-          const Text('Price (\$)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          const Text(
+            'Price (\$)',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 8),
           Row(
             children: <Widget>[

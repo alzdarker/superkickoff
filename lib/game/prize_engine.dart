@@ -144,11 +144,12 @@ class PrizeEngine {
   final Map<int, PrizeRule> configOverrides;
 
   /// Default rules. Amounts are in game currency (same scale as club budgets).
+  /// Tuned generous so mid-table clubs can afford real transfers each summer.
   static const Map<CompetitionKind, PrizeRule> defaultRules =
       <CompetitionKind, PrizeRule>{
         // League: rewards final table position, weighted to the top.
         CompetitionKind.league: PrizeRule(
-          basePool: 6000000,
+          basePool: 15000000,
           positionWeights: <int>[
             40, 30, 24, 20, 17, 15, 13, 11, 10, 9, //
             8, 7, 6, 5, 4, 3, 2, 2, 2, 1,
@@ -156,8 +157,8 @@ class PrizeEngine {
         ),
         // Domestic cup: participation plus round-by-round progression.
         CompetitionKind.domesticCup: PrizeRule(
-          basePool: 8000000,
-          participationPerClub: 60000,
+          basePool: 20000000,
+          participationPerClub: 150000,
           qualificationRounds: <int, double>{
             1: 0.06,
             2: 0.09,
@@ -165,15 +166,15 @@ class PrizeEngine {
             4: 0.20,
             5: 0.30,
           },
-          runnerUpBonus: 500000,
-          championBonus: 1000000,
+          runnerUpBonus: 1250000,
+          championBonus: 2500000,
         ),
         // Continental: groups + knockout rounds.
         CompetitionKind.continental: PrizeRule(
-          basePool: 22000000,
-          participationPerClub: 400000,
-          winBonus: 250000,
-          drawBonus: 90000,
+          basePool: 55000000,
+          participationPerClub: 1000000,
+          winBonus: 625000,
+          drawBonus: 225000,
           qualificationRounds: <int, double>{
             1: 0.08,
             2: 0.12,
@@ -181,15 +182,15 @@ class PrizeEngine {
             4: 0.24,
             5: 0.34,
           },
-          runnerUpBonus: 2000000,
-          championBonus: 4000000,
+          runnerUpBonus: 5000000,
+          championBonus: 10000000,
         ),
         // Intercontinental: broad global participation, top-heavy.
         CompetitionKind.intercontinental: PrizeRule(
-          basePool: 40000000,
-          participationPerClub: 600000,
-          winBonus: 400000,
-          drawBonus: 150000,
+          basePool: 100000000,
+          participationPerClub: 1500000,
+          winBonus: 1000000,
+          drawBonus: 375000,
           qualificationRounds: <int, double>{
             1: 0.10,
             2: 0.16,
@@ -197,15 +198,15 @@ class PrizeEngine {
             4: 0.30,
             5: 0.40,
           },
-          runnerUpBonus: 3000000,
-          championBonus: 6000000,
+          runnerUpBonus: 7500000,
+          championBonus: 15000000,
         ),
         // Super cup: two clubs, winner takes most.
         CompetitionKind.superCup: PrizeRule(
-          basePool: 3000000,
-          participationPerClub: 250000,
-          runnerUpBonus: 200000,
-          championBonus: 1500000,
+          basePool: 7500000,
+          participationPerClub: 625000,
+          runnerUpBonus: 500000,
+          championBonus: 3750000,
         ),
       };
 

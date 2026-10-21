@@ -238,7 +238,9 @@ class SeasonRepository {
       if (b.goalDifference != a.goalDifference) {
         return b.goalDifference.compareTo(a.goalDifference);
       }
-      return b.goalsFor.compareTo(a.goalsFor);
+      if (b.goalsFor != a.goalsFor) return b.goalsFor.compareTo(a.goalsFor);
+      // Level on everything (e.g. before kick-off): alphabetical.
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
     });
     return rows;
   }

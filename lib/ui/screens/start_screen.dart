@@ -107,26 +107,12 @@ class StartScreen extends StatelessWidget {
                       );
                     },
                   ),
-                  const SizedBox(height: 30),
-                  Text(
-                    '${game.initialized ? 'Database ready' : 'Loading...'}'
-                    ' • 2,014 clubs • 55k players',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textDim,
-                    ),
-                  ),
                 ],
                 const SizedBox(height: 40),
                 const Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
                     Icon(Icons.star, color: AppTheme.accent, size: 14),
-                    SizedBox(width: 6),
-                    Text(
-                      'Season 2025 database loaded',
-                      style: TextStyle(color: AppTheme.textDim, fontSize: 11),
-                    ),
                   ],
                 ),
               ],

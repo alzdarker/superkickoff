@@ -1256,14 +1256,20 @@ class SquadRepository {
       whereArgs: <Object?>[teamId],
       limit: 1,
     );
-    bool used = false;
+    final Set<String> done = <String>{};
     int sessions = 0;
     if (sessionRows.isNotEmpty) {
       final Map<String, Object?> row = sessionRows.first;
       final int rowSeason = (row['season_id'] as int?) ?? -1;
       final int lastCount = (row['last_match_count'] as int?) ?? -1;
       sessions = rowSeason == seasonId ? ((row['sessions'] as int?) ?? 0) : 0;
-      used = rowSeason == seasonId && lastCount >= matchesPlayed;
+      if (rowSeason == seasonId && lastCount >= matchesPlayed) {
+        done.addAll(
+          ((row['done_focuses'] as String?) ?? '')
+              .split(',')
+              .where((String f) => f.isNotEmpty),
+        );
+      }
     }
 
     final List<Map<String, Object?>> countRows = await db.rawQuery(
@@ -1286,7 +1292,7 @@ class SquadRepository {
     );
     final Map<String, Object?> c = countRows.first;
     return TrainingState(
-      usedThisMatchday: used,
+      doneFocuses: done,
       sessions: sessions,
       matchesPlayed: matchesPlayed,
       cost: TrainingRules.cost,
@@ -1311,9 +1317,9 @@ class SquadRepository {
       teamId: teamId,
       seasonId: seasonId,
     );
-    if (state.usedThisMatchday) {
-      return const TrainingOutcome(
-        error: 'Training is already done for this matchday.',
+    if (state.doneFocuses.contains(focus.name)) {
+      return TrainingOutcome(
+        error: '${focus.label} training is already done for this matchday.',
       );
     }
     if ((state.eligible[focus.name] ?? 0) <= 0) {
@@ -1400,6 +1406,7 @@ class SquadRepository {
         'season_id': seasonId,
         'last_match_count': state.matchesPlayed,
         'sessions': state.sessions + 1,
+        'done_focuses': <String>{...state.doneFocuses, focus.name}.join(','),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
       if (!focus.isFitness) {
         await refreshTeamPower(teamId, txn);

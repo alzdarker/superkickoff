@@ -54,6 +54,7 @@ const String coachTransfers = 'coach_transfers';
 const String sponsors = 'sponsors';
 const String sponsorships = 'sponsorships';
 const String messages = 'messages';
+const String news = 'news';
 const String transferOffers = 'transfer_offers';
 const String worldRankingHistory = 'world_ranking_history';
 const String careerHistory = 'career_history';

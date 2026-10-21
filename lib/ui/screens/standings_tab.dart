@@ -186,10 +186,10 @@ class _LeagueTable extends StatefulWidget {
 class _LeagueTableState extends State<_LeagueTable> {
   CareerProvider get game => widget.game;
 
-  static const double _rankWidth = 30;
-  static const double _statWidth = 26;
-  static const double _gdWidth = 34;
-  static const double _ptsWidth = 38;
+  static const double _rankWidth = 28;
+  static const double _statWidth = 22;
+  static const double _gdWidth = 28;
+  static const double _ptsWidth = 30;
 
   static const TextStyle _headStyle = TextStyle(
     fontSize: 11,
@@ -210,19 +210,207 @@ class _LeagueTableState extends State<_LeagueTable> {
         child: Text('No results yet — play a match to build the table.'),
       );
     }
+    final List<_QualRule> legend = _buildLegend(rows.length);
     return Column(
       children: <Widget>[
         _header(),
         Expanded(
           child: ListView.builder(
-            padding: const EdgeInsets.only(bottom: 20),
+            padding: const EdgeInsets.only(bottom: 12),
             itemCount: rows.length,
             itemBuilder: (BuildContext context, int index) =>
                 _row(game, rows[index], index),
           ),
         ),
+        if (legend.isNotEmpty) _legendWidget(legend),
       ],
     );
+  }
+
+  Widget _legendWidget(List<_QualRule> legend) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      color: AppTheme.surfaceCard,
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 4,
+        children: <Widget>[
+          for (final _QualRule rule in legend)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: rule.color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  rule.label,
+                  style: const TextStyle(fontSize: 10, color: AppTheme.textDim),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  List<_QualRule> _buildLegend(int total) {
+    final List<_QualRule> list = <_QualRule>[];
+    final Set<String> seen = <String>{};
+    for (int i = 0; i < total; i++) {
+      final _QualRule? q = _getQualification(i, total);
+      if (q != null && !seen.contains(q.label)) {
+        seen.add(q.label);
+        list.add(q);
+      }
+    }
+    return list;
+  }
+
+  _QualRule? _getQualification(int index, int total) {
+    if (!widget.tournament.isLeague) return null;
+
+    // Lower divisions
+    if (widget.tournament.divisionId > 1) {
+      if (index < widget.tournament.promotionSlots) {
+        return const _QualRule('Promotion', 'PRO', AppTheme.accent);
+      }
+      if (widget.tournament.relegationSpots > 0 &&
+          index >= total - widget.tournament.relegationSpots) {
+        return const _QualRule('Relegation', 'REL', AppTheme.danger);
+      }
+      return null;
+    }
+
+    // Top Division Relegation
+    if (widget.tournament.relegationSpots > 0 &&
+        index >= total - widget.tournament.relegationSpots) {
+      return const _QualRule('Relegation', 'REL', AppTheme.danger);
+    }
+
+    final String name = widget.tournament.name.toLowerCase();
+    final String region = widget.stats.region;
+
+    // Asia (Indonesia, Saudi, Japan, Korea, etc.)
+    final bool isAsia = region == 'asia';
+
+    if (isAsia) {
+      if (index == 0) {
+        return const _QualRule(
+          'ACL Elite (Direct)',
+          'ACL Elite',
+          Color(0xFF2196F3),
+        );
+      } else if (index == 1) {
+        return const _QualRule(
+          'ACL Two (Direct)',
+          'ACL Two',
+          Color(0xFFFF9800),
+        );
+      } else if (index == 2) {
+        return const _QualRule(
+          'Challenge League (Playoff)',
+          'ACGL PO',
+          Color(0xFF4CAF50),
+        );
+      }
+      return null;
+    }
+
+    // South America
+    final bool isSouthAmerica = region == 'southAmerica';
+
+    if (isSouthAmerica) {
+      if (index < 4) {
+        return const _QualRule(
+          'Libertadores (Direct)',
+          'Libertadores',
+          Color(0xFF2196F3),
+        );
+      } else if (index < 6) {
+        return const _QualRule(
+          'Libertadores (Playoff)',
+          'Libertadores PO',
+          Color(0xFF00BCD4),
+        );
+      } else if (index < 10) {
+        return const _QualRule(
+          'Sudamericana',
+          'Sudamericana',
+          Color(0xFFFF9800),
+        );
+      }
+      return null;
+    }
+
+    // North America (Liga MX, MLS)
+    final bool isNorthAmerica = region == 'northAmerica';
+
+    if (isNorthAmerica) {
+      if (index < 4) {
+        return const _QualRule('Champions Cup', 'CCC', Color(0xFF2196F3));
+      }
+      return null;
+    }
+
+    // Europe (Premier League, La Liga, Serie A, Bundesliga, etc.)
+    final bool isTopEuro =
+        name.contains('premier league') ||
+        name.contains('la liga') ||
+        name.contains('serie a') ||
+        name.contains('bundesliga') ||
+        name.contains('ligue 1');
+
+    if (isTopEuro) {
+      if (index < 4) {
+        return const _QualRule(
+          'Champions League (Direct)',
+          'UCL',
+          Color(0xFF2196F3),
+        );
+      } else if (index == 4) {
+        return const _QualRule(
+          'Europa League (Direct)',
+          'UEL',
+          Color(0xFFFF9800),
+        );
+      } else if (index == 5) {
+        return const _QualRule(
+          'Conference League (Playoff)',
+          'UECL PO',
+          Color(0xFF4CAF50),
+        );
+      }
+    } else if (region == 'europe') {
+      // General European League
+      if (index < 2) {
+        return const _QualRule(
+          'Champions League (Direct)',
+          'UCL',
+          Color(0xFF2196F3),
+        );
+      } else if (index == 2) {
+        return const _QualRule(
+          'Europa League (Direct)',
+          'UEL',
+          Color(0xFFFF9800),
+        );
+      } else if (index == 3) {
+        return const _QualRule(
+          'Conference League (Playoff)',
+          'UECL PO',
+          Color(0xFF4CAF50),
+        );
+      }
+    }
+
+    return null;
   }
 
   Widget _groupBody(List<GroupTable> groups) {
@@ -250,7 +438,7 @@ class _LeagueTableState extends State<_LeagueTable> {
   }
 
   Widget _header() => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
     color: AppTheme.surfaceCard,
     child: Row(
       children: <Widget>[
@@ -263,6 +451,8 @@ class _LeagueTableState extends State<_LeagueTable> {
         _headCell('W'),
         _headCell('D'),
         _headCell('L'),
+        _headCell('GF', width: _gdWidth),
+        _headCell('GA', width: _gdWidth),
         _headCell('GD', width: _gdWidth),
         _headCell('Pts', width: _ptsWidth),
       ],
@@ -295,18 +485,15 @@ class _LeagueTableState extends State<_LeagueTable> {
     bool groupStage = false,
   }) {
     final bool isUser = row.teamId == game.userTeamId;
-    final bool promotion = groupStage
-        ? index < 2
-        : widget.tournament.isLeague &&
-              index < widget.tournament.promotionSlots;
-    final bool relegation =
-        !groupStage &&
-        widget.tournament.isLeague &&
-        widget.tournament.relegationSpots > 0 &&
-        index >=
-            widget.stats.standings.length - widget.tournament.relegationSpots;
+    final _QualRule? qual = groupStage
+        ? (index < 2
+              ? const _QualRule('Knockout Stage', 'Q', AppTheme.accent)
+              : null)
+        : _getQualification(index, widget.stats.standings.length);
+    final Color barColor = qual?.color ?? Colors.transparent;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8.5),
       decoration: BoxDecoration(
         color: isUser ? AppTheme.accentDim.withAlpha(60) : null,
         border: Border(
@@ -320,13 +507,12 @@ class _LeagueTableState extends State<_LeagueTable> {
             child: Row(
               children: <Widget>[
                 Container(
-                  width: 3,
+                  width: 3.5,
                   height: 14,
-                  color: promotion
-                      ? AppTheme.accent
-                      : relegation
-                      ? AppTheme.danger
-                      : Colors.transparent,
+                  decoration: BoxDecoration(
+                    color: barColor,
+                    borderRadius: BorderRadius.circular(1.5),
+                  ),
                 ),
                 const SizedBox(width: 4),
                 Text(
@@ -339,15 +525,21 @@ class _LeagueTableState extends State<_LeagueTable> {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: Text(
-                row.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: isUser ? FontWeight.w700 : FontWeight.w400,
-                  color: isUser ? AppTheme.accent : Colors.white,
-                ),
+              child: Row(
+                children: <Widget>[
+                  Flexible(
+                    child: Text(
+                      row.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: isUser ? FontWeight.w700 : FontWeight.w400,
+                        color: isUser ? AppTheme.accent : Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -355,6 +547,8 @@ class _LeagueTableState extends State<_LeagueTable> {
           _cell('${row.wins}'),
           _cell('${row.draws}'),
           _cell('${row.losses}'),
+          _cell('${row.goalsFor}', width: _gdWidth),
+          _cell('${row.goalsAgainst}', width: _gdWidth),
           _cell('${row.goalDifference}', width: _gdWidth),
           _cell('${row.points}', width: _ptsWidth, bold: true),
         ],
@@ -546,4 +740,12 @@ class _LeaderList extends StatelessWidget {
       ],
     );
   }
+}
+
+class _QualRule {
+  const _QualRule(this.label, this.shortTag, this.color);
+
+  final String label;
+  final String shortTag;
+  final Color color;
 }

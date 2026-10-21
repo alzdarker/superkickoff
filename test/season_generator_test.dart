@@ -191,7 +191,8 @@ void main() {
       );
       expect(rows, isNotEmpty, reason: 'continental cup has fixtures');
       // Every entrant is paired, so the first round has an even tie count.
-      expect(rows.length.isEven, isTrue);
+      // A two-club super cup is a single match.
+      expect(rows.length.isEven || rows.length == 1, isTrue);
     }
 
     final List<Map<String, Object?>> foreignRows = await db.rawQuery(

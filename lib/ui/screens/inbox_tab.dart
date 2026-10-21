@@ -8,7 +8,18 @@ import '../../state/career_provider.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
-/// Club inbox: news about results, transfers, injuries and season events.
+/// Full-screen wrapper so the inbox can open from the app bar.
+class InboxScreen extends StatelessWidget {
+  const InboxScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Inbox')),
+    body: const InboxTab(),
+  );
+}
+
+/// Club inbox: offers, contracts, injuries and season events.
 class InboxTab extends StatelessWidget {
   const InboxTab({super.key});
 

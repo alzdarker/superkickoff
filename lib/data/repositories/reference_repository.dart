@@ -43,6 +43,36 @@ class ReferenceRepository {
         <Object?>[countryId, countryId, t.orgLeague],
       );
 
+  /// Continental zone of a league, taken from the continental cup its country plays in.
+  Future<String> leagueRegion(int tournamentId) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT isl.tournament_id FROM tournament_countries tc
+      JOIN international_slots isl ON isl.country_id = tc.country_id
+      WHERE tc.tournament_id = ? AND isl.tournament_id IN (49, 50, 52, 99, 100)
+    ''',
+      <Object?>[tournamentId],
+    );
+    final Set<Object?> ids = rows.map((r) => r['tournament_id']).toSet();
+    const Map<int, String> zones = <int, String>{
+      49: 'europe',
+      50: 'northAmerica',
+      52: 'southAmerica',
+      99: 'asia',
+      100: 'africa',
+    };
+    for (final MapEntry<int, String> z in zones.entries) {
+      if (ids.contains(z.key)) return z.value;
+    }
+    return '';
+  }
+
+  /// Every country, for the manager's nationality picker.
+  Future<List<Map<String, Object?>>> allCountries() => db.rawQuery(
+    'SELECT country_id, name, iso2 FROM countries WHERE name IS NOT NULL '
+    'ORDER BY name COLLATE NOCASE',
+  );
+
   /// Continental club competitions this country's clubs qualify for.
   Future<List<Tournament>> internationalCups(int countryId) async {
     final rows = await db.rawQuery(

@@ -167,7 +167,7 @@ void main() {
     expect(detail!.suspensionMatches, 2);
   });
 
-  test('weekly training can only be used once per matchday', () async {
+  test('each training focus can be used once per matchday', () async {
     final ReferenceRepository refs = ReferenceRepository(db);
     final SquadRepository squads = SquadRepository(db);
     final Team club = (await refs.teamsForDivision(141, 1)).first;
@@ -182,7 +182,7 @@ void main() {
       teamId: club.teamId,
       seasonId: seasonId,
     );
-    expect(state.usedThisMatchday, isFalse);
+    expect(state.doneFocuses, isEmpty);
     final TrainingFocus focus = TrainingFocus.values.firstWhere(
       (TrainingFocus f) => (state.eligible[f.name] ?? 0) > 0,
     );
@@ -198,7 +198,7 @@ void main() {
       teamId: club.teamId,
       seasonId: seasonId,
     );
-    expect(state.usedThisMatchday, isTrue);
+    expect(state.doneFocuses, <String>{focus.name});
     expect(state.sessions, 1);
     final TrainingOutcome second = await squads.runTraining(
       teamId: club.teamId,
@@ -206,5 +206,18 @@ void main() {
       focus: focus,
     );
     expect(second.ok, isFalse);
+
+    // A different focus is still available on the same matchday.
+    final TrainingFocus? other = TrainingFocus.values
+        .where((TrainingFocus f) => f != focus && (state.eligible[f.name] ?? 0) > 0)
+        .firstOrNull;
+    if (other != null) {
+      final TrainingOutcome third = await squads.runTraining(
+        teamId: club.teamId,
+        seasonId: seasonId,
+        focus: other,
+      );
+      expect(third.ok, isTrue, reason: third.error);
+    }
   });
 }

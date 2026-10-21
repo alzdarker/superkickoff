@@ -78,7 +78,23 @@ class AppDatabase {
         team_id INTEGER PRIMARY KEY,
         season_id INTEGER NOT NULL,
         last_match_count INTEGER NOT NULL DEFAULT -1,
-        sessions INTEGER NOT NULL DEFAULT 0
+        sessions INTEGER NOT NULL DEFAULT 0,
+        done_focuses TEXT NOT NULL DEFAULT ''
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${t.news} (
+        news_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ref TEXT NOT NULL UNIQUE,
+        season_id INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        category TEXT NOT NULL,
+        headline TEXT NOT NULL,
+        body TEXT NOT NULL,
+        importance INTEGER NOT NULL DEFAULT 1,
+        team_id INTEGER,
+        player_id INTEGER
       )
     ''');
     await db.execute('''
@@ -189,6 +205,71 @@ class AppDatabase {
         '3,6', '2', 0, 0, 0, 0, 0, 0
       )
     ''');
+    await db.execute('''
+      INSERT OR IGNORE INTO ${t.tournaments} (
+        tournament_id, name, division_id, status, organization, rounds,
+        play_days, slots, points, promotion_slots, relegation_spots,
+        prize_teams, prize_top_scorer, prize_mvp
+      ) VALUES
+      (1650, 'AFC Challenge League', 0, 1, 2, 2, '2', '32', 1.0, 0, 0, 8000000, 0, 0),
+      (1651, 'AFC Super Cup', 0, 1, 2, 1, '6', '2', 1.0, 0, 0, 4000000, 0, 0)
+    ''');
+    // Ensure international slots for AFC Challenge League (Indonesia, Thailand, Malaysia, Vietnam, India, etc.)
+    await db.execute('''
+      INSERT OR IGNORE INTO ${t.internationalSlots} (tournament_id, country_id, slots) VALUES
+      -- AFC Challenge League (1650)
+      (1650, 94, 2),  -- Indonesia
+      (1650, 223, 2), -- Thailand
+      (1650, 146, 2), -- Malaysia
+      (1650, 243, 2), -- Vietnam
+      (1650, 93, 2),  -- India
+      (1650, 96, 2),  -- Iraq
+      (1650, 95, 2),  -- Iran
+      (1650, 184, 2), -- Qatar
+      (1650, 240, 2), -- Uzbekistan
+      (1650, 10, 2),  -- Saudi Arabia
+      (1650, 124, 2), -- Japan
+      (1650, 49, 2),  -- South Korea
+      (1650, 41, 2),  -- China
+      (1650, 14, 2),  -- Australia
+
+      -- UEFA Super Cup (54)
+      (54, 64, 1),   -- Spain
+      (54, 185, 1),  -- England
+      (54, 3, 1),    -- Germany
+      (54, 122, 1),  -- Italy
+
+      -- AFC Super Cup (1651)
+      (1651, 10, 1),  -- Saudi Arabia
+      (1651, 124, 1), -- Japan
+      (1651, 49, 1),  -- South Korea
+      (1651, 94, 1),  -- Indonesia
+
+      -- Intercontinental Cup (56) - 8 clubs worldwide
+      (56, 64, 1),   -- Europe (Spain)
+      (56, 185, 1),  -- Europe (England)
+      (56, 30, 1),   -- South America (Brazil)
+      (56, 11, 1),   -- South America (Argentina)
+      (56, 141, 1),  -- North America (Mexico)
+      (56, 10, 1),   -- Asia (Saudi Arabia)
+      (56, 94, 1),   -- Asia (Indonesia)
+      (56, 58, 1),   -- Africa (Egypt)
+
+      -- FIFA Club World Cup (163) - 16 clubs worldwide
+      (163, 64, 2),  -- Spain
+      (163, 185, 2), -- England
+      (163, 3, 1),   -- Germany
+      (163, 122, 1), -- Italy
+      (163, 71, 1),  -- France
+      (163, 30, 2),  -- Brazil
+      (163, 11, 2),  -- Argentina
+      (163, 141, 1), -- Mexico
+      (163, 65, 1),  -- USA
+      (163, 10, 1),  -- Saudi Arabia
+      (163, 124, 1), -- Japan
+      (163, 94, 1),  -- Indonesia
+      (163, 58, 1)   -- Egypt
+    ''');
     final List<Map<String, Object?>> offerColumns = await db.rawQuery(
       'PRAGMA table_info(${t.transferOffers})',
     );
@@ -197,6 +278,16 @@ class AppDatabase {
     )) {
       await db.execute(
         'ALTER TABLE ${t.transferOffers} ADD COLUMN is_loan INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+    final List<Map<String, Object?>> trainingColumns = await db.rawQuery(
+      'PRAGMA table_info(${t.teamTraining})',
+    );
+    if (!trainingColumns.any(
+      (Map<String, Object?> column) => column['name'] == 'done_focuses',
+    )) {
+      await db.execute(
+        "ALTER TABLE ${t.teamTraining} ADD COLUMN done_focuses TEXT NOT NULL DEFAULT ''",
       );
     }
     final List<Map<String, Object?>> academyColumns = await db.rawQuery(

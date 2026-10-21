@@ -95,7 +95,8 @@ class _TrainingSheetState extends State<TrainingSheet> {
   Widget _content(TrainingState state) {
     final CareerProvider game = context.watch<CareerProvider>();
     final int eligible = state.eligible[_focus.name] ?? 0;
-    final bool canTrain = !state.usedThisMatchday && eligible > 0 && !_busy;
+    final bool focusDone = state.doneFocuses.contains(_focus.name);
+    final bool canTrain = !focusDone && eligible > 0 && !_busy;
     return Column(
       children: <Widget>[
         const SizedBox(height: 8),
@@ -138,7 +139,7 @@ class _TrainingSheetState extends State<TrainingSheet> {
                     ),
                     SizedBox(height: 2),
                     Text(
-                      'One session per matchday',
+                      'One session per focus each matchday',
                       style: TextStyle(fontSize: 11, color: AppTheme.textDim),
                     ),
                   ],
@@ -163,7 +164,11 @@ class _TrainingSheetState extends State<TrainingSheet> {
                   children: <Widget>[
                     for (final TrainingFocus focus in TrainingFocus.values)
                       ChoiceChip(
-                        label: Text(focus.label),
+                        label: Text(
+                          state.doneFocuses.contains(focus.name)
+                              ? '${focus.label} \u2713'
+                              : focus.label,
+                        ),
                         selected: _focus == focus,
                         onSelected: (_) => setState(() => _focus = focus),
                       ),
@@ -218,7 +223,7 @@ class _TrainingSheetState extends State<TrainingSheet> {
                 _row('Session cost', money(state.cost)),
                 _row('Club budget', money(game.userTeam?.budget ?? 0)),
                 _row('Sessions completed', '${state.sessions}'),
-                if (state.usedThisMatchday) ...<Widget>[
+                if (focusDone) ...<Widget>[
                   const SizedBox(height: 12),
                   Container(
                     width: double.infinity,
@@ -230,15 +235,20 @@ class _TrainingSheetState extends State<TrainingSheet> {
                         color: AppTheme.warn.withValues(alpha: 0.4),
                       ),
                     ),
-                    child: const Row(
+                    child: Row(
                       children: <Widget>[
-                        Icon(Icons.schedule, size: 18, color: AppTheme.warn),
-                        SizedBox(width: 8),
+                        const Icon(
+                          Icons.schedule,
+                          size: 18,
+                          color: AppTheme.warn,
+                        ),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Training is done for this matchday. '
-                            'Play your next match to unlock another session.',
-                            style: TextStyle(fontSize: 11),
+                            '${_focus.label} training is done for this matchday. '
+                            'Pick another focus, or play your next match to '
+                            'unlock it again.',
+                            style: const TextStyle(fontSize: 11),
                           ),
                         ),
                       ],
@@ -265,7 +275,7 @@ class _TrainingSheetState extends State<TrainingSheet> {
                       )
                     : const Icon(Icons.play_arrow, size: 18),
                 label: Text(
-                  state.usedThisMatchday
+                  focusDone
                       ? 'Already trained today'
                       : eligible <= 0
                       ? 'No eligible players'
