@@ -582,6 +582,15 @@ class CareerProvider extends ChangeNotifier {
     return error;
   }
 
+  Future<YouthAcademyState> youthAcademyState() =>
+      _squads.youthAcademyState(userTeamId);
+
+  Future<String?> upgradeYouthAcademy() async {
+    final String? error = await _squads.upgradeYouthAcademy(userTeamId);
+    if (error == null) await refreshWorld();
+    return error;
+  }
+
   Future<TrainingState> trainingState() => _squads.trainingStatus(
     teamId: userTeamId,
     seasonId: season?.seasonId ?? 0,

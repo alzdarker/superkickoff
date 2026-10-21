@@ -28,6 +28,7 @@ class ClubHubSheet extends StatefulWidget {
 class _ClubHubSheetState extends State<ClubHubSheet> {
   late Future<ClubOverview?> _future;
   late Future<List<ClubTrophy>> _trophies;
+  late Future<YouthAcademyState> _academy;
   bool _busy = false;
 
   @override
@@ -35,12 +36,14 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
     super.initState();
     _future = context.read<CareerProvider>().clubOverview();
     _trophies = context.read<CareerProvider>().clubTrophies();
+    _academy = context.read<CareerProvider>().youthAcademyState();
   }
 
   void _reload() {
     setState(() {
       _future = context.read<CareerProvider>().clubOverview();
       _trophies = context.read<CareerProvider>().clubTrophies();
+      _academy = context.read<CareerProvider>().youthAcademyState();
     });
   }
 
@@ -60,6 +63,21 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Stadium expanded successfully.')),
     );
+  }
+
+  Future<void> _upgradeAcademy() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final String? error = await context.read<CareerProvider>().upgradeYouthAcademy();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: AppTheme.danger),
+      );
+      return;
+    }
+    _reload();
   }
 
   @override
@@ -87,7 +105,7 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
 
   Widget _content(ClubOverview club) {
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Column(
         children: <Widget>[
           const SizedBox(height: 8),
@@ -154,6 +172,8 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
             ),
           ),
           const TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             labelColor: AppTheme.accent,
             unselectedLabelColor: AppTheme.textDim,
             indicatorColor: AppTheme.accent,
@@ -162,6 +182,7 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
               Tab(text: 'Overview'),
               Tab(text: 'Finances'),
               Tab(text: 'Stadium'),
+              Tab(text: 'Academy'),
               Tab(text: 'Honours'),
             ],
           ),
@@ -171,6 +192,7 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
                 _overviewTab(club),
                 _financesTab(club),
                 _stadiumTab(club),
+                _academyTab(),
                 _honoursTab(),
               ],
             ),
@@ -238,6 +260,54 @@ class _ClubHubSheetState extends State<ClubHubSheet> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _academyTab() {
+    return FutureBuilder<YouthAcademyState>(
+      future: _academy,
+      builder: (BuildContext context, AsyncSnapshot<YouthAcademyState> snap) {
+        if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+        final YouthAcademyState academy = snap.data!;
+        final int minOverall = 42 + academy.level * 2;
+        final int maxOverall = minOverall + 3;
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Icon(Icons.school, size: 38, color: AppTheme.accent),
+              const SizedBox(height: 12),
+              Text(
+                'Youth Academy · Level ${academy.level}/10',
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'One 17-year-old prospect graduates at the start of every new season.',
+                style: const TextStyle(fontSize: 12, color: AppTheme.textDim),
+              ),
+              const SizedBox(height: 16),
+              Text('Expected graduate: OVR $minOverall–$maxOverall',
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              Text('Higher levels also improve potential.',
+                style: const TextStyle(fontSize: 12, color: AppTheme.textDim)),
+              const Spacer(),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _busy || academy.isMaxLevel ? null : _upgradeAcademy,
+                  icon: const Icon(Icons.upgrade),
+                  label: Text(academy.isMaxLevel
+                      ? 'Academy Maxed'
+                      : 'Upgrade to Level ${academy.level + 1} · ${money(academy.upgradeCost)}'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

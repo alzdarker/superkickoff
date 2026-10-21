@@ -701,6 +701,20 @@ class ClubOverview {
 }
 
 /// Weekly training availability and eligible-player counts per focus.
+class YouthAcademyState {
+  const YouthAcademyState({
+    required this.level,
+    required this.upgradeCost,
+    this.lastGraduatedDate,
+  });
+
+  final int level;
+  final int upgradeCost;
+  final String? lastGraduatedDate;
+
+  bool get isMaxLevel => level >= 10;
+}
+
 class TrainingState {
   const TrainingState({
     required this.usedThisMatchday,

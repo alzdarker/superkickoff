@@ -967,6 +967,188 @@ class SquadRepository {
     };
   }
 
+  // ---------------------------------------------------------- youth academy
+
+  int youthAcademyUpgradeCost(int level) => level.clamp(1, 9) * 1000000;
+
+  Future<YouthAcademyState> youthAcademyState(int teamId) async {
+    await db.insert(t.teamYouthAcademy, <String, Object?>{
+      'team_id': teamId,
+      'level': 1,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    final List<Map<String, Object?>> rows = await db.query(
+      t.teamYouthAcademy,
+      where: 'team_id = ?',
+      whereArgs: <Object?>[teamId],
+      limit: 1,
+    );
+    final Map<String, Object?> row = rows.first;
+    final int level = (row['level'] as int?) ?? 1;
+    return YouthAcademyState(
+      level: level,
+      upgradeCost: youthAcademyUpgradeCost(level),
+      lastGraduatedDate: row['last_graduated_date'] as String?,
+    );
+  }
+
+  Future<String?> upgradeYouthAcademy(int teamId) async {
+    final YouthAcademyState state = await youthAcademyState(teamId);
+    if (state.isMaxLevel) return 'Youth Academy is already level 10.';
+    final List<Map<String, Object?>> teams = await db.query(
+      t.teams,
+      columns: <String>['budget'],
+      where: 'team_id = ?',
+      whereArgs: <Object?>[teamId],
+      limit: 1,
+    );
+    final int budget = teams.isEmpty ? 0 : (teams.first['budget'] as int? ?? 0);
+    if (budget < state.upgradeCost) {
+      return 'Not enough budget: upgrade costs ${_moneyShort(state.upgradeCost)}.';
+    }
+    await db.transaction((Transaction txn) async {
+      await txn.update(
+        t.teams,
+        <String, Object?>{'budget': budget - state.upgradeCost},
+        where: 'team_id = ?',
+        whereArgs: <Object?>[teamId],
+      );
+      await txn.update(
+        t.teamYouthAcademy,
+        <String, Object?>{'level': state.level + 1},
+        where: 'team_id = ?',
+        whereArgs: <Object?>[teamId],
+      );
+    });
+    return null;
+  }
+
+  /// Produces 5–9 prospects every three in-game months.
+  Future<List<Player>> graduateYouthPlayersIfDue({
+    required int teamId,
+    required String date,
+  }) async {
+    final YouthAcademyState academy = await youthAcademyState(teamId);
+    final DateTime currentDate = DateTime.tryParse(date) ?? DateTime.now();
+    final DateTime? previousDate = DateTime.tryParse(academy.lastGraduatedDate ?? '');
+    if (previousDate == null) {
+      await db.update(
+        t.teamYouthAcademy,
+        <String, Object?>{'last_graduated_date': date},
+        where: 'team_id = ?',
+        whereArgs: <Object?>[teamId],
+      );
+      return <Player>[];
+    }
+    if (currentDate.difference(previousDate).inDays < 90) return <Player>[];
+    final List<Map<String, Object?>> teams = await db.query(
+      t.teams,
+      where: 'team_id = ?',
+      whereArgs: <Object?>[teamId],
+      limit: 1,
+    );
+    if (teams.isEmpty) return <Player>[];
+    final Map<String, Object?> team = teams.first;
+    final math.Random random = math.Random();
+    final int countryId = (team['country_id'] as int?) ?? 141;
+    final List<Map<String, Object?>> nameRows = await db.query(
+      t.players,
+      columns: <String>['name'],
+      where: 'country_id = ? AND name IS NOT NULL',
+      whereArgs: <Object?>[countryId],
+      orderBy: 'RANDOM()',
+      limit: 12,
+    );
+    final int prospectCount = 5 + random.nextInt(5);
+    final List<Player> prospects = <Player>[];
+    for (int i = 0; i < prospectCount; i++) {
+      final int prospectPower = 42 + academy.level * 2 + random.nextInt(4);
+      final int prospectPotential =
+          (prospectPower + 12 + academy.level + random.nextInt(6)).clamp(
+            prospectPower,
+            95,
+          );
+      final int positionId = 1 + random.nextInt(11);
+      final String name = _academyName(nameRows, random);
+      final int value = prospectPower * prospectPower * 1000;
+      final int salary = 1000 + academy.level * 250;
+      late final int playerId;
+      await db.transaction((Transaction txn) async {
+        playerId = await txn.insert(t.players, <String, Object?>{
+          'name': name,
+          'age': 17,
+          'height': 168 + random.nextInt(23),
+          'stars': academy.level >= 7 ? 1 : 0,
+          'value': value,
+          'salary': salary,
+          'profile': random.nextBool() ? 'D' : 'I',
+          'fitness': 100,
+          'status_id': t.statusActive,
+          'power': prospectPower,
+          'potential': prospectPotential,
+          'market_status': t.marketActive,
+          'country_id': countryId,
+          'position_id': positionId,
+          'squad_status': t.squadReserve,
+          'is_captain': 0,
+          'shirt_number': 0,
+          'skill_a': 0,
+          'skill_b': 0,
+        });
+        await txn.insert(t.teamPlayers, <String, Object?>{
+          'team_id': teamId,
+          'player_id': playerId,
+        });
+        await txn.update(
+          t.teamYouthAcademy,
+          <String, Object?>{'last_graduated_date': date},
+          where: 'team_id = ?',
+          whereArgs: <Object?>[teamId],
+        );
+        await refreshTeamPower(teamId, txn);
+      });
+      prospects.add(
+        Player(
+          playerId: playerId,
+          name: name,
+          age: 17,
+          positionId: positionId,
+          power: prospectPower,
+          potential: prospectPotential,
+          fitness: 100,
+          value: value,
+          salary: salary,
+          countryId: countryId,
+          squadStatus: t.squadReserve,
+          marketStatus: t.marketActive,
+          statusId: t.statusActive,
+          isCaptain: false,
+          shirtNumber: 0,
+          stars: academy.level >= 7 ? 1 : 0,
+          skillA: 0,
+          skillB: 0,
+          height: 180,
+          championships: null,
+        ),
+      );
+    }
+    return prospects;
+  }
+
+  String _academyName(List<Map<String, Object?>> rows, math.Random random) {
+    final List<List<String>> parts = <List<String>>[
+      for (final Map<String, Object?> row in rows)
+        ((row['name'] as String?) ?? '')
+            .trim()
+            .split(RegExp(r'\s+'))
+            .where((String part) => part.isNotEmpty)
+            .toList(),
+    ].where((List<String> name) => name.isNotEmpty).toList();
+    if (parts.isEmpty) return 'Youth Player ${random.nextInt(9000) + 1000}';
+    final List<String> first = parts[random.nextInt(parts.length)];
+    final List<String> last = parts[random.nextInt(parts.length)];
+    return '${first.first} ${last.last}';
+  }
+
   // --------------------------------------------------------------- training
 
   /// Availability and eligible-player counts for this matchday.

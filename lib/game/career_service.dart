@@ -341,7 +341,34 @@ class CareerService {
     );
     await _matchRepo.paySalaries(seasonId);
     await db.execute('UPDATE teams SET budget = MAX(budget, 20000)');
+    await _runYouthAcademy(userTeamId);
     await _runMarketAi(userTeamId);
+  }
+
+  /// Academy graduates arrive every three in-game months.
+  Future<void> _runYouthAcademy(int userTeamId) async {
+    final List<Map<String, Object?>> rows = await db.rawQuery(
+      '''
+      SELECT MAX(date) AS last_date FROM matches
+      WHERE season_id = (SELECT MAX(season_id) FROM seasons) AND date IS NOT NULL
+    ''',
+    );
+    final String? date = rows.isEmpty
+        ? null
+        : rows.first['last_date'] as String?;
+    if (date == null) return;
+    final List<Player> graduates = await _squads.graduateYouthPlayersIfDue(
+      teamId: userTeamId,
+      date: date,
+    );
+    if (graduates.isEmpty) return;
+    await _messages.insert(
+      title: 'Youth Academy: ${graduates.length} new prospects',
+      body: '${graduates.length} academy players joined your squad:\n'
+          '${graduates.map((Player p) => '${p.name} (OVR ${p.power}/POT ${p.potential})').join('\n')}',
+      teamId: userTeamId,
+      sender: 'Youth Academy',
+    );
   }
 
   /// Finds one interested AI buyer when the manager lists a player for sale.

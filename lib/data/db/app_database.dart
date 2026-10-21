@@ -82,6 +82,14 @@ class AppDatabase {
       )
     ''');
     await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${t.teamYouthAcademy} (
+        team_id INTEGER PRIMARY KEY,
+        level INTEGER NOT NULL DEFAULT 1,
+        last_graduated_season INTEGER,
+        last_graduated_date TEXT
+      )
+    ''');
+    await db.execute('''
       CREATE TABLE IF NOT EXISTS ${t.transferOffers} (
         offer_id INTEGER PRIMARY KEY AUTOINCREMENT,
         player_id INTEGER NOT NULL,
@@ -98,6 +106,16 @@ class AppDatabase {
         message_id INTEGER
       )
     ''');
+    final List<Map<String, Object?>> academyColumns = await db.rawQuery(
+      'PRAGMA table_info(${t.teamYouthAcademy})',
+    );
+    if (!academyColumns.any(
+      (Map<String, Object?> column) => column['name'] == 'last_graduated_date',
+    )) {
+      await db.execute(
+        'ALTER TABLE ${t.teamYouthAcademy} ADD COLUMN last_graduated_date TEXT',
+      );
+    }
     final List<Map<String, Object?>> messageColumns = await db.rawQuery(
       'PRAGMA table_info(${t.messages})',
     );
