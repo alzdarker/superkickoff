@@ -207,6 +207,10 @@ class SquadRepository {
   Future<List<Map<String, Object?>>> marketPlayers({
     String? search,
     int? positionType,
+    int? minAge,
+    int? maxAge,
+    int? minPrice,
+    int? maxPrice,
     int? excludeTeamId,
     int limit = 50,
   }) {
@@ -220,6 +224,10 @@ class SquadRepository {
     final String excludeClause = excludeTeamId == null
         ? ''
         : 'AND tm.team_id != ? ';
+    final String minAgeClause = minAge == null ? '' : 'AND p.age >= ? ';
+    final String maxAgeClause = maxAge == null ? '' : 'AND p.age <= ? ';
+    final String minPriceClause = minPrice == null ? '' : 'AND p.value >= ? ';
+    final String maxPriceClause = maxPrice == null ? '' : 'AND p.value <= ? ';
     final String sql =
         '''
       SELECT p.player_id, p.name, p.age, p.position_id, p.profile, p.power,
@@ -230,7 +238,7 @@ class SquadRepository {
       JOIN team_players tp ON tp.player_id = p.player_id
       JOIN teams tm ON tm.team_id = tp.team_id
       WHERE p.status_id = ? AND p.market_status = ${t.marketForSale}
-      $excludeClause$searchClause$posClause
+      $excludeClause$searchClause$posClause$minAgeClause$maxAgeClause$minPriceClause$maxPriceClause
       ORDER BY p.power DESC
       LIMIT ?
     '''
@@ -239,6 +247,62 @@ class SquadRepository {
     if (excludeTeamId != null) args.add(excludeTeamId);
     if (search != null && search.isNotEmpty) args.add('%$search%');
     if (positionType != null) args.add(positionType);
+    if (minAge != null) args.add(minAge);
+    if (maxAge != null) args.add(maxAge);
+    if (minPrice != null) args.add(minPrice);
+    if (maxPrice != null) args.add(maxPrice);
+    args.add(limit);
+    return db.rawQuery(sql, args);
+  }
+
+  /// All active players (not just listed), with optional filters.
+  Future<List<Map<String, Object?>>> allMarketPlayers({
+    String? search,
+    int? positionType,
+    int? minAge,
+    int? maxAge,
+    int? minPrice,
+    int? maxPrice,
+    int? excludeTeamId,
+    int limit = 100,
+  }) {
+    final String searchClause = search == null || search.isEmpty
+        ? ''
+        : 'AND p.name LIKE ? ';
+    final String posClause = positionType == null
+        ? ''
+        : 'AND p.position_id IN '
+              '(SELECT position_id FROM positions WHERE type = ?) ';
+    final String excludeClause = excludeTeamId == null
+        ? ''
+        : 'AND tm.team_id != ? ';
+    final String minAgeClause = minAge == null ? '' : 'AND p.age >= ? ';
+    final String maxAgeClause = maxAge == null ? '' : 'AND p.age <= ? ';
+    final String minPriceClause = minPrice == null ? '' : 'AND p.value >= ? ';
+    final String maxPriceClause = maxPrice == null ? '' : 'AND p.value <= ? ';
+    final String sql =
+        '''
+      SELECT p.player_id, p.name, p.age, p.position_id, p.profile, p.power,
+             p.potential, p.fitness, p.value, p.salary, p.country_id, p.stars,
+             tm.team_id AS club_team_id, tm.name AS club_name,
+             tm.abbreviation AS club_abbrev
+      FROM players p
+      JOIN team_players tp ON tp.player_id = p.player_id
+      JOIN teams tm ON tm.team_id = tp.team_id
+      WHERE p.status_id = ?
+      $excludeClause$searchClause$posClause$minAgeClause$maxAgeClause$minPriceClause$maxPriceClause
+      ORDER BY p.power DESC
+      LIMIT ?
+    '''
+            .trim();
+    final List<Object?> args = <Object?>[t.statusActive];
+    if (excludeTeamId != null) args.add(excludeTeamId);
+    if (search != null && search.isNotEmpty) args.add('%$search%');
+    if (positionType != null) args.add(positionType);
+    if (minAge != null) args.add(minAge);
+    if (maxAge != null) args.add(maxAge);
+    if (minPrice != null) args.add(minPrice);
+    if (maxPrice != null) args.add(maxPrice);
     args.add(limit);
     return db.rawQuery(sql, args);
   }
@@ -595,7 +659,11 @@ class SquadRepository {
   }
 
   /// Snapshot of the club finances, stadium and coach for the club hub.
-  Future<ClubOverview?> clubOverview(int teamId) async {
+  Future<ClubOverview?> clubOverview(
+    int teamId, {
+    String? managerName,
+    String? managerCountry,
+  }) async {
     final String expiryCutoff = DateTime.now()
         .add(const Duration(days: 365))
         .toIso8601String()
@@ -647,10 +715,10 @@ class SquadRepository {
       maxStand: (r['max_stand'] as int?) ?? 0,
       maxTerrace: (r['max_terrace'] as int?) ?? 0,
       maxBoxes: (r['max_boxes'] as int?) ?? 0,
-      coachName: (r['coach_name'] as String?) ?? 'No coach',
-      coachAge: (r['coach_age'] as int?) ?? 0,
-      coachPoints: (r['coach_points'] as int?) ?? 0,
-      coachCountry: (r['coach_country'] as String?) ?? '',
+      coachName: managerName ?? (r['coach_name'] as String?) ?? 'No coach',
+      coachAge: managerName == null ? (r['coach_age'] as int?) ?? 0 : 0,
+      coachPoints: managerName == null ? (r['coach_points'] as int?) ?? 0 : 0,
+      coachCountry: managerCountry ?? (r['coach_country'] as String?) ?? '',
       squadValue: (r['squad_value'] as int?) ?? 0,
       wageBill: (r['wage_bill'] as int?) ?? 0,
       expiringContracts: (r['expiring'] as int?) ?? 0,

@@ -1,5 +1,7 @@
 /// Typed models for the core game entities. Only the entities the game
 /// actively manipulates get classes; the rest are read as raw maps.
+library;
+
 import '../db/schema.dart' as t;
 
 class Country {
@@ -32,6 +34,15 @@ class Country {
     'power': power,
     'confederation': confederation,
   };
+}
+
+/// The local manager identity used for the active career. This is deliberately
+/// separate from the real-world coach record in the reference database.
+class ManagerProfile {
+  const ManagerProfile({required this.name, required this.countryId});
+
+  final String name;
+  final int countryId;
 }
 
 class Team {
@@ -347,6 +358,7 @@ class Message {
     required this.sender,
     required this.isRead,
     required this.type,
+    this.transferOfferId,
   });
 
   final int messageId;
@@ -356,6 +368,7 @@ class Message {
   final String? sender;
   final bool isRead;
   final int type;
+  final int? transferOfferId;
 
   factory Message.fromMap(Map<String, Object?> m) => Message(
     messageId: m['message_id'] as int,
@@ -365,6 +378,7 @@ class Message {
     sender: m['sender'] as String?,
     isRead: (m['is_read'] as int? ?? 0) == 1,
     type: (m['type'] as int?) ?? 0,
+    transferOfferId: m['transfer_offer_id'] as int?,
   );
 }
 
@@ -418,6 +432,25 @@ class GroupTable {
 
   final int groupId;
   final List<StandingRow> rows;
+}
+
+/// Standings and leaderboards for one competition in one season.
+class CompetitionStats {
+  const CompetitionStats({
+    required this.standings,
+    required this.groups,
+    required this.scorers,
+    required this.assists,
+    required this.cleanSheets,
+    required this.rated,
+  });
+
+  final List<StandingRow> standings;
+  final List<GroupTable> groups;
+  final List<LeaderRow> scorers;
+  final List<LeaderRow> assists;
+  final List<LeaderRow> cleanSheets;
+  final List<LeaderRow> rated;
 }
 
 /// One row of a statistical leaderboard (scorers, assists, clean sheets...).
@@ -761,6 +794,67 @@ class PlayerAward {
     t.awardYoungPlayer => 'Best young player',
     _ => 'Award',
   };
+}
+
+/// A transfer offer in negotiation.
+class TransferOffer {
+  TransferOffer({
+    required this.offerId,
+    required this.playerId,
+    required this.playerName,
+    required this.fromTeamId,
+    required this.fromTeamName,
+    required this.toTeamId,
+    required this.toTeamName,
+    required this.offerAmount,
+    required this.playerValue,
+    required this.playerSalary,
+    required this.status,
+    this.counterAmount,
+    this.proposedSalary,
+    this.proposedDurationYears,
+    required this.createdDate,
+    this.updatedDate,
+    this.messageId,
+  });
+
+  final int offerId;
+  final int playerId;
+  final String playerName;
+  final int fromTeamId;
+  final String fromTeamName;
+  final int toTeamId;
+  final String toTeamName;
+  final int offerAmount;
+  final int playerValue;
+  final int playerSalary;
+  final int status;
+  final int? counterAmount;
+  final int? proposedSalary;
+  final int? proposedDurationYears;
+  final String createdDate;
+  final String? updatedDate;
+  final int? messageId;
+
+  factory TransferOffer.fromMap(Map<String, Object?> m) => TransferOffer(
+    offerId: m['offer_id'] as int,
+    playerId: m['player_id'] as int,
+    playerName: m['player_name'] as String? ?? '',
+    fromTeamId: m['from_team_id'] as int,
+    fromTeamName: m['from_team_name'] as String? ?? '',
+    toTeamId: m['to_team_id'] as int,
+    toTeamName: m['to_team_name'] as String? ?? '',
+    offerAmount: (m['offer_amount'] as int?) ?? 0,
+    playerValue: (m['player_value'] as int?) ?? 0,
+    playerSalary: (m['player_salary'] as int?) ?? 0,
+    status: (m['status'] as int?) ?? 1,
+    counterAmount: m['counter_amount'] as int?,
+    proposedSalary: m['proposed_salary'] as int?,
+    proposedDurationYears: m['proposed_duration_years'] as int?,
+    createdDate: m['created_date'] as String? ?? '',
+    updatedDate: m['updated_date'] as String?,
+    messageId: m['message_id'] as int?,
+  );
 }
 
 /// One season in the manager's career history.

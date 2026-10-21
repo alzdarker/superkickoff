@@ -17,6 +17,8 @@ class FixturesTab extends StatefulWidget {
 class _FixturesTabState extends State<FixturesTab> {
   List<FixtureMatch>? fixtures;
   Map<int, String> tournamentNames = <int, String>{};
+  final GlobalKey _currentWeekKey = GlobalKey();
+  String? _scrolledToDate;
 
   @override
   void didChangeDependencies() {
@@ -74,6 +76,27 @@ class _FixturesTabState extends State<FixturesTab> {
       groups.putIfAbsent(key, () => <FixtureMatch>[]).add(m);
     }
     final List<String> keys = groups.keys.toList();
+    final String? currentKey = game.nextDate == null
+        ? null
+        : keys.cast<String?>().firstWhere(
+            (String? key) => groups[key]!.any(
+              (FixtureMatch match) => match.date == game.nextDate,
+            ),
+            orElse: () => null,
+          );
+    if (currentKey != null && _scrolledToDate != game.nextDate) {
+      _scrolledToDate = game.nextDate;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final BuildContext? target = _currentWeekKey.currentContext;
+        if (target != null) {
+          Scrollable.ensureVisible(
+            target,
+            duration: const Duration(milliseconds: 250),
+            alignment: 0.08,
+          );
+        }
+      });
+    }
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.builder(
@@ -88,6 +111,7 @@ class _FixturesTabState extends State<FixturesTab> {
             );
           final DateTime? date = DateTime.tryParse(group.first.date ?? '');
           return Column(
+            key: key == currentKey ? _currentWeekKey : null,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Padding(
@@ -106,32 +130,6 @@ class _FixturesTabState extends State<FixturesTab> {
                         ),
                       ),
                     ),
-                    if (knockoutMatches[group.first.tournamentId] != null &&
-                        group.first.phase == 1)
-                      TextButton.icon(
-                        onPressed: () {
-                          Tournament? tournament;
-                          for (final Tournament cup in game.cups) {
-                            if (cup.tournamentId == group.first.tournamentId) {
-                              tournament = cup;
-                              break;
-                            }
-                          }
-                          if (tournament == null) return;
-                          showKnockoutBracket(
-                            context,
-                            tournament: tournament,
-                            matches: knockoutMatches[tournament.tournamentId]!,
-                            teams: game.teamCache,
-                          );
-                        },
-                        icon: const Icon(Icons.account_tree_outlined, size: 15),
-                        label: const Text('Bracket'),
-                        style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          textStyle: const TextStyle(fontSize: 11),
-                        ),
-                      ),
                   ],
                 ),
               ),

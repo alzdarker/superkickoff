@@ -65,6 +65,7 @@ class SeasonGenerator {
       final List<Team> invited = await _internationalTeams(
         tour,
         exclude: continentalInvites,
+        beforeSeasonId: season.seasonId,
       );
       if (invited.length < 4) continue;
       final Map<int, Team> byId = <int, Team>{
@@ -186,6 +187,7 @@ class SeasonGenerator {
       final List<Team> invited = await _internationalTeams(
         tour,
         exclude: continentalInvites,
+        beforeSeasonId: season.seasonId,
       );
       if (invited.length < 4) continue;
       final Map<int, Team> byId = <int, Team>{
@@ -383,6 +385,7 @@ class SeasonGenerator {
   Future<List<Team>> _internationalTeams(
     Tournament tour, {
     Set<int> exclude = const <int>{},
+    int? beforeSeasonId,
   }) async {
     final rows = await db.query(
       t.internationalSlots,
@@ -394,20 +397,99 @@ class SeasonGenerator {
       final int countryId = row['country_id'] as int;
       final int slots = (row['slots'] as int?) ?? 0;
       if (slots <= 0) continue;
-      final List<Map<String, Object?>> clubRows = await db.query(
-        t.teams,
-        where: 'country_id = ? AND division = 1',
-        whereArgs: <Object?>[countryId],
-        orderBy: 'power DESC',
+      final List<Team> clubs = await _continentalQualifiers(
+        countryId,
+        beforeSeasonId: beforeSeasonId,
       );
-      final List<Team> picked = clubRows
-          .map(Team.fromMap)
+      final List<Team> picked = clubs
           .where((Team tm) => !exclude.contains(tm.teamId))
           .take(slots)
           .toList();
       teams.addAll(picked);
     }
     return teams;
+  }
+
+  /// Qualification follows the latest completed domestic table when one is
+  /// available; a new save falls back to club strength.
+  Future<List<Team>> _continentalQualifiers(
+    int countryId, {
+    int? beforeSeasonId,
+  }) async {
+    final List<Map<String, Object?>> clubRows = await db.query(
+      t.teams,
+      where: 'country_id = ? AND division = 1',
+      whereArgs: <Object?>[countryId],
+      orderBy: 'power DESC',
+    );
+    final List<Team> clubs = clubRows.map(Team.fromMap).toList();
+    if (beforeSeasonId == null) return _fallbackQualifiers(clubs);
+    final List<Map<String, Object?>> seasonRows = await db.rawQuery(
+      '''
+      SELECT st.season_id, tu.tournament_id
+      FROM season_tournaments st
+      JOIN tournaments tu ON tu.tournament_id = st.tournament_id
+      JOIN tournament_countries tc ON tc.tournament_id = tu.tournament_id
+      WHERE tu.organization = ? AND tu.division_id = 1
+        AND tc.country_id = ? AND st.season_id < ?
+      ORDER BY st.season_id DESC
+      LIMIT 1
+    ''',
+      <Object?>[t.orgLeague, countryId, beforeSeasonId],
+    );
+    if (seasonRows.isEmpty || seasonRows.first['season_id'] == null) {
+      return _fallbackQualifiers(clubs);
+    }
+    final int seasonId = seasonRows.first['season_id'] as int;
+    final int tournamentId = seasonRows.first['tournament_id'] as int;
+    final List<Map<String, Object?>> results = await db.rawQuery(
+      '''
+      SELECT team_id, SUM(points) AS points,
+             SUM(goals_for) - SUM(goals_against) AS goal_difference,
+             SUM(goals_for) AS goals_for
+      FROM (
+        SELECT home_team_id AS team_id,
+               CASE WHEN home_goals > away_goals THEN 3
+                    WHEN home_goals = away_goals THEN 1 ELSE 0 END AS points,
+               home_goals AS goals_for, away_goals AS goals_against
+        FROM matches WHERE season_id = ? AND tournament_id = ? AND status = ?
+        UNION ALL
+        SELECT away_team_id AS team_id,
+               CASE WHEN away_goals > home_goals THEN 3
+                    WHEN away_goals = home_goals THEN 1 ELSE 0 END AS points,
+               away_goals AS goals_for, home_goals AS goals_against
+        FROM matches WHERE season_id = ? AND tournament_id = ? AND status = ?
+      ) GROUP BY team_id
+      ORDER BY points DESC, goal_difference DESC, goals_for DESC
+    ''',
+      <Object?>[
+        seasonId,
+        tournamentId,
+        t.matchFinished,
+        seasonId,
+        tournamentId,
+        t.matchFinished,
+      ],
+    );
+    if (results.isEmpty) return _fallbackQualifiers(clubs);
+    final Map<int, Team> byId = <int, Team>{
+      for (final Team club in clubs) club.teamId: club,
+    };
+    final List<Team> ordered = <Team>[
+      for (final Map<String, Object?> row in results)
+        if (byId.remove(row['team_id']) case final Team club) club,
+    ];
+    ordered.addAll(byId.values);
+    return ordered;
+  }
+
+  /// Countries outside the simulated domestic world have no table to qualify
+  /// from. Rotate their leading clubs instead of selecting the same power list
+  /// every season.
+  List<Team> _fallbackQualifiers(List<Team> clubs) {
+    final List<Team> leading = clubs.take(min(8, clubs.length)).toList()
+      ..shuffle(_rng);
+    return <Team>[...leading, ...clubs.skip(leading.length)];
   }
 
   Future<List<Team>> _teamsOf(int countryId, int? divisionId) async {

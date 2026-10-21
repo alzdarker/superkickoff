@@ -9,7 +9,7 @@ class MessageRepository {
 
   final Database db;
 
-  Future<void> insert({
+  Future<int> insert({
     required String title,
     required String body,
     String? sender,
@@ -17,6 +17,7 @@ class MessageRepository {
     String? date,
     int? playerId,
     int? teamId,
+    int? transferOfferId,
   }) {
     return db.insert(t.messages, <String, Object?>{
       'title': title,
@@ -27,6 +28,7 @@ class MessageRepository {
       'type': type,
       'player_id': playerId,
       'team_id': teamId,
+      'transfer_offer_id': transferOfferId,
     });
   }
 

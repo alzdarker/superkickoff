@@ -11,6 +11,7 @@ import '../data/repositories/message_repository.dart';
 import '../data/repositories/reference_repository.dart';
 import '../data/repositories/season_repository.dart';
 import '../data/repositories/squad_repository.dart';
+import '../data/repositories/transfer_repository.dart';
 import 'formation.dart';
 import 'match_engine.dart';
 import 'season_generator.dart';
@@ -29,6 +30,7 @@ class CareerService {
     required MessageRepository messages,
     required MatchEngine engine,
     required SeasonGenerator generator,
+    TransferRepository? transfers,
     Random? random,
     this.marketTickChance = 0.45,
   }) : _refs = refs,
@@ -36,6 +38,7 @@ class CareerService {
        _squads = squads,
        _matchRepo = matches,
        _messages = messages,
+       _transfers = transfers,
        _engine = engine,
        _gen = generator,
        _rng = random ?? Random();
@@ -46,6 +49,7 @@ class CareerService {
   final SquadRepository _squads;
   final MatchRepository _matchRepo;
   final MessageRepository _messages;
+  final TransferRepository? _transfers;
   final MatchEngine _engine;
   final SeasonGenerator _gen;
   final Random _rng;
@@ -197,7 +201,7 @@ class CareerService {
     int? penaltyAway;
     List<MatchEvent> events = result.events;
     // Knockout ties cannot end level: decide them with a shootout.
-    if (winnerId == null && await _isKnockout(match.tournamentId)) {
+    if (winnerId == null && await _isKnockout(match)) {
       final MatchPenaltyShootout shootout = _engine.penaltyShootout(
         result.input,
       );
@@ -243,19 +247,21 @@ class CareerService {
     return result;
   }
 
-  Future<bool> _isKnockout(int tournamentId) async {
-    if (_cupTournaments.contains(tournamentId)) return true;
+  Future<bool> _isKnockout(FixtureMatch match) async {
+    // Continental group matches are draws after 90 minutes, just like leagues.
+    if (match.groupId != null) return false;
+    if (_cupTournaments.contains(match.tournamentId)) return true;
     final List<Map<String, Object?>> rows = await db.query(
       t.tournaments,
       columns: <String>['organization'],
       where: 'tournament_id = ?',
-      whereArgs: <Object?>[tournamentId],
+      whereArgs: <Object?>[match.tournamentId],
       limit: 1,
     );
     if (rows.isEmpty) return false;
     final int org = (rows.first['organization'] as int?) ?? 0;
     final bool isCup = org == t.orgNationalCup || org == t.orgInternational;
-    if (isCup) _cupTournaments.add(tournamentId);
+    if (isCup) _cupTournaments.add(match.tournamentId);
     return isCup;
   }
 
@@ -338,8 +344,44 @@ class CareerService {
     await _runMarketAi(userTeamId);
   }
 
-  /// AI clubs occasionally buy listed players off the market (including
-  /// players the user put up for sale).
+  /// Finds one interested AI buyer when the manager lists a player for sale.
+  /// The manager receives the offer in the inbox and decides whether to sell.
+  Future<void> requestSaleOffer({
+    required int userTeamId,
+    required Player player,
+  }) async {
+    final TransferRepository? transfers = _transfers;
+    if (transfers == null) return;
+    final List<Team> candidates = (await _registeredClubs())
+        .where(
+          (Team team) =>
+              team.teamId != userTeamId && team.budget >= (player.value * 0.8).round(),
+        )
+        .toList();
+    if (candidates.isEmpty) return;
+
+    final Team buyer = candidates[_rng.nextInt(candidates.length)];
+    final int offerAmount = (player.value * (0.85 + _rng.nextDouble() * 0.20))
+        .round()
+        .clamp(1, buyer.budget);
+    final int offerId = await transfers.createOffer(
+      playerId: player.playerId,
+      fromTeamId: userTeamId,
+      toTeamId: buyer.teamId,
+      offerAmount: offerAmount,
+      playerValue: player.value,
+    );
+    await _messages.insert(
+      title: 'Transfer offer received',
+      body: '${buyer.name} offered ${_money(offerAmount)} for ${player.name}. '
+          'Open this message to accept, reject, or make a counter offer.',
+      teamId: userTeamId,
+      sender: buyer.name,
+      transferOfferId: offerId,
+    );
+  }
+
+  /// AI clubs occasionally buy listed players off the market.
   Future<void> _runMarketAi(int userTeamId) async {
     if (_rng.nextDouble() > marketTickChance) return;
     final List<Team> clubs = await _registeredClubs();

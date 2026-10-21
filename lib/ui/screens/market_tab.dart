@@ -19,15 +19,21 @@ class MarketTab extends StatefulWidget {
 class _MarketTabState extends State<MarketTab> {
   final TextEditingController _search = TextEditingController();
   List<Map<String, Object?>> players = <Map<String, Object?>>[];
+  List<Map<String, Object?>> allPlayers = <Map<String, Object?>>[];
   int? positionFilter;
+  int? minAge;
+  int? maxAge;
+  int? minPrice;
+  int? maxPrice;
   bool loading = true;
+  bool loadingAll = true;
   String? error;
-  int _historyVersion = 0;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _loadAllPlayers();
   }
 
   @override
@@ -42,6 +48,10 @@ class _MarketTabState extends State<MarketTab> {
     final List<Map<String, Object?>> list = await game.marketPlayers(
       search: _search.text.trim().isEmpty ? null : _search.text.trim(),
       positionType: positionFilter,
+      minAge: minAge,
+      maxAge: maxAge,
+      minPrice: minPrice,
+      maxPrice: maxPrice,
     );
     if (!mounted) return;
     setState(() {
@@ -50,43 +60,108 @@ class _MarketTabState extends State<MarketTab> {
     });
   }
 
-  Future<void> _confirmBuy(Map<String, Object?> row) async {
+  Future<void> _loadAllPlayers() async {
+    setState(() => loadingAll = true);
+    final CareerProvider game = context.read<CareerProvider>();
+    final List<Map<String, Object?>> list = await game.allMarketPlayers(
+      search: _search.text.trim().isEmpty ? null : _search.text.trim(),
+      positionType: positionFilter,
+      minAge: minAge,
+      maxAge: maxAge,
+      minPrice: minPrice,
+      maxPrice: maxPrice,
+    );
+    if (!mounted) return;
+    setState(() {
+      allPlayers = list;
+      loadingAll = false;
+    });
+  }
+
+  void _showFilterDrawer() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (BuildContext context) => _FilterDrawer(
+        minAge: minAge,
+        maxAge: maxAge,
+        minPrice: minPrice,
+        maxPrice: maxPrice,
+        onApply: (int? newMinAge, int? newMaxAge, int? newMinPrice, int? newMaxPrice) {
+          setState(() {
+            minAge = newMinAge;
+            maxAge = newMaxAge;
+            minPrice = newMinPrice;
+            maxPrice = newMaxPrice;
+          });
+          _load();
+          _loadAllPlayers();
+        },
+        onClear: () {
+          setState(() {
+            minAge = null;
+            maxAge = null;
+            minPrice = null;
+            maxPrice = null;
+          });
+          _load();
+          _loadAllPlayers();
+        },
+      ),
+    );
+  }
+
+  Future<void> _makeOffer(Map<String, Object?> row) async {
     final CareerProvider game = context.read<CareerProvider>();
     final int value = (row['value'] as int?) ?? 0;
-    final bool? ok = await showDialog<bool>(
+    final TextEditingController offer = TextEditingController(
+      text: value.toString(),
+    );
+    final int? amount = await showDialog<int>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
-        title: Text('Sign ${row['name']}?'),
-        content: Text(
-          'Transfer fee: ${money(value)}\n'
-          'Club: ${row['club_name'] ?? 'Free agent'}\n'
-          'Power: ${row['power']} / Potential: ${row['potential']}\n'
-          'Your budget: ${money(game.userTeam?.budget ?? 0)}',
+        title: Text('Offer for ${row['name']}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('Club: ${row['club_name'] ?? 'Free agent'}'),
+            Text('Player value: ${money(value)}'),
+            Text('Your budget: ${money(game.userTeam?.budget ?? 0)}'),
+            const SizedBox(height: 14),
+            TextField(
+              controller: offer,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Your offer',
+                prefixText: '\$',
+              ),
+            ),
+          ],
         ),
         actions: <Widget>[
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Buy'),
+            onPressed: () => Navigator.of(dialogContext).pop(
+              int.tryParse(offer.text.trim()),
+            ),
+            child: const Text('Send Offer'),
           ),
         ],
       ),
     );
-    if (ok != true) return;
-    final String? failure = await game.buyPlayer(row);
+    offer.dispose();
+    if (amount == null || amount <= 0) return;
+    final String? failure = await game.makeTransferOffer(row, amount);
     if (!mounted) return;
-    setState(() {
-      error = failure;
-      if (failure == null) _historyVersion++;
-    });
+    setState(() => error = failure);
     if (failure == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${row['name']} joined your squad!')),
+        SnackBar(content: Text('Offer sent for ${row['name']}. Check Inbox.')),
       );
-      await _load();
     }
   }
 
@@ -94,7 +169,7 @@ class _MarketTabState extends State<MarketTab> {
   Widget build(BuildContext context) {
     final CareerProvider game = context.watch<CareerProvider>();
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Column(
         children: <Widget>[
           Padding(
@@ -106,6 +181,12 @@ class _MarketTabState extends State<MarketTab> {
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
                 const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.filter_list, size: 20),
+                  onPressed: _showFilterDrawer,
+                  tooltip: 'Filter',
+                ),
+                const SizedBox(width: 8),
                 Text(
                   'Budget ${money(game.userTeam?.budget ?? 0)}',
                   style: const TextStyle(fontSize: 11, color: AppTheme.accent),
@@ -120,6 +201,7 @@ class _MarketTabState extends State<MarketTab> {
             dividerColor: Colors.white10,
             tabs: <Widget>[
               Tab(text: 'Listed players'),
+              Tab(text: 'All Players'),
               Tab(text: 'Transfer history'),
             ],
           ),
@@ -127,7 +209,8 @@ class _MarketTabState extends State<MarketTab> {
             child: TabBarView(
               children: <Widget>[
                 _listedTab(),
-                _TransferHistory(key: ValueKey<int>(_historyVersion)),
+                _allPlayersTab(),
+                const _TransferHistory(),
               ],
             ),
           ),
@@ -214,7 +297,94 @@ class _MarketTabState extends State<MarketTab> {
                       final Map<String, Object?> row = players[index];
                       return _PlayerMarketCard(
                         row: row,
-                        onBuy: () => _confirmBuy(row),
+                        onBuy: () => _makeOffer(row),
+                      );
+                    },
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _allPlayersTab() {
+    return Column(
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+          child: TextField(
+            controller: _search,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => _loadAllPlayers(),
+            decoration: InputDecoration(
+              hintText: 'Search players...',
+              prefixIcon: const Icon(Icons.search),
+              isDense: true,
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.clear),
+                onPressed: () {
+                  _search.clear();
+                  _loadAllPlayers();
+                },
+              ),
+            ),
+          ),
+        ),
+        SizedBox(
+          height: 46,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            children: <Widget>[
+              for (final (String label, int? type) in <(String, int?)>[
+                ('All', null),
+                ('GK', 1),
+                ('DEF', 2),
+                ('MID', 3),
+                ('ATT', 4),
+              ])
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: ChoiceChip(
+                    label: Text(label),
+                    selected: positionFilter == type,
+                    onSelected: (_) {
+                      setState(() => positionFilter = type);
+                      _loadAllPlayers();
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              error!,
+              style: const TextStyle(color: AppTheme.danger, fontSize: 11),
+            ),
+          ),
+        Expanded(
+          child: loadingAll
+              ? const Center(child: CircularProgressIndicator())
+              : allPlayers.isEmpty
+              ? const Center(
+                  child: Text(
+                    'No players found.',
+                    textAlign: TextAlign.center,
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _loadAllPlayers,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 20),
+                    itemCount: allPlayers.length,
+                    itemBuilder: (BuildContext context, int index) {
+                      final Map<String, Object?> row = allPlayers[index];
+                      return _PlayerMarketCard(
+                        row: row,
+                        onBuy: () => _makeOffer(row),
                       );
                     },
                   ),
@@ -259,7 +429,7 @@ class _PlayerMarketCard extends StatelessWidget {
 }
 
 class _TransferHistory extends StatefulWidget {
-  const _TransferHistory({super.key});
+  const _TransferHistory();
 
   @override
   State<_TransferHistory> createState() => _TransferHistoryState();
@@ -369,6 +539,153 @@ class _TransferHistoryState extends State<_TransferHistory> {
               ),
             );
           },
+    );
+  }
+}
+
+class _FilterDrawer extends StatefulWidget {
+  const _FilterDrawer({
+    required this.minAge,
+    required this.maxAge,
+    required this.minPrice,
+    required this.maxPrice,
+    required this.onApply,
+    required this.onClear,
+  });
+
+  final int? minAge;
+  final int? maxAge;
+  final int? minPrice;
+  final int? maxPrice;
+  final void Function(int?, int?, int?, int?) onApply;
+  final VoidCallback onClear;
+
+  @override
+  State<_FilterDrawer> createState() => _FilterDrawerState();
+}
+
+class _FilterDrawerState extends State<_FilterDrawer> {
+  late TextEditingController _minAgeCtrl;
+  late TextEditingController _maxAgeCtrl;
+  late TextEditingController _minPriceCtrl;
+  late TextEditingController _maxPriceCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _minAgeCtrl = TextEditingController(text: widget.minAge?.toString());
+    _maxAgeCtrl = TextEditingController(text: widget.maxAge?.toString());
+    _minPriceCtrl = TextEditingController(text: widget.minPrice?.toString());
+    _maxPriceCtrl = TextEditingController(text: widget.maxPrice?.toString());
+  }
+
+  @override
+  void dispose() {
+    _minAgeCtrl.dispose();
+    _maxAgeCtrl.dispose();
+    _minPriceCtrl.dispose();
+    _maxPriceCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text(
+            'Filter Players',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 16),
+          const Text('Age', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: TextField(
+                  controller: _minAgeCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Min',
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: TextField(
+                  controller: _maxAgeCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Max',
+                    isDense: true,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text('Price (\$)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: TextField(
+                  controller: _minPriceCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Min',
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: TextField(
+                  controller: _maxPriceCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Max',
+                    isDense: true,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () {
+                    widget.onClear();
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Clear'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: () {
+                    final int? minAge = int.tryParse(_minAgeCtrl.text);
+                    final int? maxAge = int.tryParse(_maxAgeCtrl.text);
+                    final int? minPrice = int.tryParse(_minPriceCtrl.text);
+                    final int? maxPrice = int.tryParse(_maxPriceCtrl.text);
+                    widget.onApply(minAge, maxAge, minPrice, maxPrice);
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Apply'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

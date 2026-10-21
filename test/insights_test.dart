@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:superkickoff/data/db/app_database.dart';
 import 'package:superkickoff/data/db/schema.dart' as t;
 import 'package:superkickoff/data/models/models.dart';
 import 'package:superkickoff/data/repositories/reference_repository.dart';
@@ -26,14 +27,7 @@ void main() {
       target.path,
       options: OpenDatabaseOptions(version: 1, readOnly: false),
     );
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS ${t.teamTraining} (
-        team_id INTEGER PRIMARY KEY,
-        season_id INTEGER NOT NULL,
-        last_match_count INTEGER NOT NULL DEFAULT -1,
-        sessions INTEGER NOT NULL DEFAULT 0
-      )
-    ''');
+    await AppDatabase.ensureLocalTables(db);
   });
 
   tearDownAll(() async {

@@ -7,6 +7,7 @@ import '../../state/career_provider.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'inbox_tab.dart';
+import 'knockout_bracket_sheet.dart';
 import 'club_hub_sheet.dart';
 import 'market_tab.dart';
 import 'match_screen.dart';
@@ -35,80 +36,163 @@ class _HomeScreenState extends State<HomeScreen> {
         body: Center(child: Text('No career found — restart the app.')),
       );
     }
-    return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: <Widget>[
-            CrestAvatar(team: team, radius: 14),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (!didPop) _leaveCareer(context);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Row(
+            children: <Widget>[
+              CrestAvatar(team: team, radius: 14),
+              const SizedBox(width: 8),
+              Text(team.name, style: const TextStyle(fontSize: 16)),
+            ],
+          ),
+          actions: <Widget>[
+            Chip(
+              avatar: const Icon(Icons.calendar_month, size: 14),
+              label: Text(
+                game.season?.name ?? 'Season ?',
+                style: const TextStyle(fontSize: 11),
+              ),
+            ),
+            if (game.cups.isNotEmpty)
+              IconButton(
+                tooltip: 'Knockout brackets',
+                icon: const Icon(Icons.account_tree_outlined),
+                onPressed: () => _openBrackets(context, game),
+              ),
+            IconButton(
+              tooltip: 'Save and exit',
+              icon: const Icon(Icons.exit_to_app),
+              onPressed: () => _leaveCareer(context),
+            ),
             const SizedBox(width: 8),
-            Text(team.name, style: const TextStyle(fontSize: 16)),
           ],
         ),
-        actions: <Widget>[
-          Chip(
-            avatar: const Icon(Icons.calendar_month, size: 14),
-            label: Text(
-              game.season?.name ?? 'Season ?',
-              style: const TextStyle(fontSize: 11),
-            ),
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: Stack(
-        children: <Widget>[
-          RefreshIndicator(onRefresh: game.refreshWorld, child: _body(game)),
-          if (game.busy)
-            Container(
-              color: Colors.black54,
-              child: Center(
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        const CircularProgressIndicator(),
-                        const SizedBox(height: 12),
-                        Text(game.busyStatus),
-                      ],
+        body: Stack(
+          children: <Widget>[
+            RefreshIndicator(onRefresh: game.refreshWorld, child: _body(game)),
+            if (game.busy)
+              Container(
+                color: Colors.black54,
+                child: Center(
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          const CircularProgressIndicator(),
+                          const SizedBox(height: 12),
+                          Text(game.busyStatus),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
+          ],
+        ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _index,
+          onDestinationSelected: (int i) {
+            setState(() => _index = i);
+          },
+          destinations: <Widget>[
+            const NavigationDestination(
+              icon: Icon(Icons.outlined_flag),
+              label: 'Overview',
             ),
-        ],
+            const NavigationDestination(
+              icon: Icon(Icons.groups),
+              label: 'Squad',
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.event),
+              label: 'Fixtures',
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.table_chart),
+              label: 'Table',
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.mail_outline),
+              label: 'Inbox',
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.storefront),
+              label: 'Market',
+            ),
+          ],
+        ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (int i) {
-          setState(() => _index = i);
-        },
-        destinations: <Widget>[
-          const NavigationDestination(
-            icon: Icon(Icons.outlined_flag),
-            label: 'Overview',
+    );
+  }
+
+  Future<void> _openBrackets(BuildContext context, CareerProvider game) async {
+    final Tournament? tournament = await showModalBottomSheet<Tournament>(
+      context: context,
+      builder: (BuildContext context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: <Widget>[
+            const ListTile(title: Text('Knockout brackets')),
+            for (final Tournament cup in game.cups)
+              ListTile(
+                leading: const Icon(Icons.account_tree_outlined),
+                title: Text(cup.name),
+                onTap: () => Navigator.pop(context, cup),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (tournament == null || !context.mounted) return;
+    final List<FixtureMatch> fixtures = await game.seasonFixtures();
+    if (!context.mounted) return;
+    showKnockoutBracket(
+      context,
+      tournament: tournament,
+      matches: fixtures
+          .where(
+            (FixtureMatch match) =>
+                match.tournamentId == tournament.tournamentId &&
+                match.groupId == null,
+          )
+          .toList(),
+      teams: game.teamCache,
+    );
+  }
+
+  Future<void> _leaveCareer(BuildContext context) async {
+    final bool? save = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('Leave career?'),
+        content: const Text('Do you want to save this session?'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
           ),
-          const NavigationDestination(icon: Icon(Icons.groups), label: 'Squad'),
-          const NavigationDestination(
-            icon: Icon(Icons.event),
-            label: 'Fixtures',
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Don't save"),
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.table_chart),
-            label: 'Table',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.mail_outline),
-            label: 'Inbox',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.storefront),
-            label: 'Market',
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
           ),
         ],
       ),
     );
+    if (save == null || !context.mounted) return;
+    await context.read<CareerProvider>().leaveCareer(save: save);
+    if (!context.mounted) return;
+    Navigator.of(context).pop();
   }
 
   Widget _body(CareerProvider game) {

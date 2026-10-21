@@ -8,122 +8,182 @@ import '../widgets/common.dart';
 import 'player_detail_sheet.dart';
 import 'season_history_sheet.dart';
 
-/// League table plus season leaderboards (scorers, assists, clean sheets and
-/// average match rating).
-class StandingsTab extends StatelessWidget {
+/// Competition table plus leaderboards. Every domestic and continental
+/// competition generated for this career can be selected here.
+class StandingsTab extends StatefulWidget {
   const StandingsTab({super.key});
+
+  @override
+  State<StandingsTab> createState() => _StandingsTabState();
+}
+
+class _StandingsTabState extends State<StandingsTab> {
+  int? _selectedId;
+  int? _loadedTournamentId;
+  int? _loadedSeasonId;
+  Future<CompetitionStats>? _stats;
+
+  void _select(CareerProvider game, int id) {
+    setState(() {
+      _selectedId = id;
+      _loadedTournamentId = id;
+      _loadedSeasonId = game.season?.seasonId;
+      _stats = game.competitionStats(id);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final CareerProvider game = context.watch<CareerProvider>();
-    return DefaultTabController(
-      length: 5,
-      child: Column(
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-            child: Row(
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    game.league?.name ?? 'League',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
+    final List<Tournament> options = <Tournament>[
+      if (game.league != null) game.league!,
+      ...game.cups,
+    ];
+    if (options.isEmpty) {
+      return const Center(child: Text('No competition available.'));
+    }
+    final int selectedId =
+        options.any(
+          (Tournament tournament) => tournament.tournamentId == _selectedId,
+        )
+        ? _selectedId!
+        : options.first.tournamentId;
+    final Tournament selected = options.firstWhere(
+      (Tournament tournament) => tournament.tournamentId == selectedId,
+    );
+    if (_stats == null ||
+        _loadedTournamentId != selectedId ||
+        _loadedSeasonId != game.season?.seasonId) {
+      _loadedTournamentId = selectedId;
+      _loadedSeasonId = game.season?.seasonId;
+      _stats = game.competitionStats(selectedId);
+    }
+    return FutureBuilder<CompetitionStats>(
+      future: _stats,
+      builder:
+          (BuildContext context, AsyncSnapshot<CompetitionStats> snapshot) {
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final CompetitionStats stats = snapshot.data!;
+            return DefaultTabController(
+              length: 5,
+              child: Column(
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<int>(
+                              value: selectedId,
+                              isExpanded: true,
+                              dropdownColor: AppTheme.surfaceCard,
+                              items: <DropdownMenuItem<int>>[
+                                for (final Tournament tournament in options)
+                                  DropdownMenuItem<int>(
+                                    value: tournament.tournamentId,
+                                    child: Text(
+                                      tournament.name,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (int? id) {
+                                if (id != null) _select(game, id);
+                              },
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Season history',
+                          icon: const Icon(Icons.history, size: 20),
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const SeasonHistoryScreen(),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                IconButton(
-                  tooltip: 'Season history',
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.history, size: 20),
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const SeasonHistoryScreen(),
+                  const TabBar(
+                    isScrollable: true,
+                    tabAlignment: TabAlignment.start,
+                    dividerColor: Colors.transparent,
+                    labelColor: AppTheme.accent,
+                    unselectedLabelColor: AppTheme.textDim,
+                    indicatorColor: AppTheme.accent,
+                    tabs: <Widget>[
+                      Tab(text: 'Table'),
+                      Tab(text: 'Scorers'),
+                      Tab(text: 'Assists'),
+                      Tab(text: 'Clean sheets'),
+                      Tab(text: 'Rating'),
+                    ],
+                  ),
+                  Expanded(
+                    child: TabBarView(
+                      children: <Widget>[
+                        _LeagueTable(
+                          game: game,
+                          tournament: selected,
+                          stats: stats,
+                        ),
+                        _LeaderList(
+                          rows: stats.scorers,
+                          metric: 'Goals',
+                          userTeamId: game.userTeamId,
+                          emptyHint: 'No goals scored yet this season.',
+                        ),
+                        _LeaderList(
+                          rows: stats.assists,
+                          metric: 'Assists',
+                          userTeamId: game.userTeamId,
+                          emptyHint: 'No assists recorded yet this season.',
+                        ),
+                        _LeaderList(
+                          rows: stats.cleanSheets,
+                          metric: 'Clean sheets',
+                          userTeamId: game.userTeamId,
+                          emptyHint:
+                              'No clean sheets recorded yet this season.',
+                        ),
+                        _LeaderList(
+                          rows: stats.rated,
+                          metric: 'Avg rating',
+                          userTeamId: game.userTeamId,
+                          emptyHint:
+                              'Ratings appear after players complete a match.',
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                if (game.cups.isNotEmpty)
-                  Flexible(
-                    child: Text(
-                      game.cups.map((Tournament t) => t.name).join(' · '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppTheme.warn,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            dividerColor: Colors.transparent,
-            labelColor: AppTheme.accent,
-            unselectedLabelColor: AppTheme.textDim,
-            indicatorColor: AppTheme.accent,
-            labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-            unselectedLabelStyle: TextStyle(fontSize: 12),
-            tabs: <Widget>[
-              Tab(text: 'Table'),
-              Tab(text: 'Scorers'),
-              Tab(text: 'Assists'),
-              Tab(text: 'Clean sheets'),
-              Tab(text: 'Rating'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
-              children: <Widget>[
-                _LeagueTable(game: game),
-                _LeaderList(
-                  rows: game.topScorers,
-                  metric: 'Goals',
-                  userTeamId: game.userTeamId,
-                  emptyHint: 'No goals scored yet this season.',
-                ),
-                _LeaderList(
-                  rows: game.topAssists,
-                  metric: 'Assists',
-                  userTeamId: game.userTeamId,
-                  emptyHint: 'No assists recorded yet this season.',
-                ),
-                _LeaderList(
-                  rows: game.topCleanSheets,
-                  metric: 'Clean sheets',
-                  userTeamId: game.userTeamId,
-                  emptyHint: 'No clean sheets recorded yet this season.',
-                ),
-                _LeaderList(
-                  rows: game.topRated,
-                  metric: 'Avg rating',
-                  userTeamId: game.userTeamId,
-                  emptyHint: 'Ratings appear after players complete a match.',
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+                ],
+              ),
+            );
+          },
     );
   }
 }
 
 class _LeagueTable extends StatefulWidget {
-  const _LeagueTable({required this.game});
+  const _LeagueTable({
+    required this.game,
+    required this.tournament,
+    required this.stats,
+  });
 
   final CareerProvider game;
+  final Tournament tournament;
+  final CompetitionStats stats;
 
   @override
   State<_LeagueTable> createState() => _LeagueTableState();
 }
 
 class _LeagueTableState extends State<_LeagueTable> {
-  int? _selectedId;
-
   CareerProvider get game => widget.game;
 
   static const double _rankWidth = 30;
@@ -139,59 +199,12 @@ class _LeagueTableState extends State<_LeagueTable> {
 
   @override
   Widget build(BuildContext context) {
-    final List<Tournament> options = <Tournament>[
-      if (game.league != null) game.league!,
-      ...game.cups.where(
-        (Tournament tour) =>
-            tour.isInternational &&
-            (game.cupGroups[tour.tournamentId]?.isNotEmpty ?? false),
-      ),
-    ];
-    final int leagueId = game.league?.tournamentId ?? 0;
-    if (options.isEmpty) {
-      return const Center(child: Text('No table available.'));
-    }
-    final int selectedId =
-        options.any((Tournament tour) => tour.tournamentId == _selectedId)
-        ? _selectedId!
-        : leagueId != 0
-        ? leagueId
-        : options.first.tournamentId;
-    return Column(
-      children: <Widget>[
-        if (options.length > 1) _selector(options, selectedId),
-        Expanded(
-          child: selectedId == leagueId
-              ? _leagueBody()
-              : _groupBody(game.cupGroups[selectedId] ?? const <GroupTable>[]),
-        ),
-      ],
-    );
+    return widget.stats.groups.isNotEmpty
+        ? _groupBody(widget.stats.groups)
+        : _leagueBody(widget.stats.standings);
   }
 
-  Widget _selector(List<Tournament> options, int selectedId) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-    alignment: Alignment.centerLeft,
-    child: DropdownButtonHideUnderline(
-      child: DropdownButton<int>(
-        value: selectedId,
-        isDense: true,
-        dropdownColor: AppTheme.surfaceCard,
-        style: const TextStyle(fontSize: 12, color: Colors.white),
-        items: <DropdownMenuItem<int>>[
-          for (final Tournament tour in options)
-            DropdownMenuItem<int>(
-              value: tour.tournamentId,
-              child: Text(tour.name),
-            ),
-        ],
-        onChanged: (int? id) => setState(() => _selectedId = id),
-      ),
-    ),
-  );
-
-  Widget _leagueBody() {
-    final List<StandingRow> rows = game.standings;
+  Widget _leagueBody(List<StandingRow> rows) {
     if (rows.isEmpty) {
       return const Center(
         child: Text('No results yet — play a match to build the table.'),
@@ -284,12 +297,14 @@ class _LeagueTableState extends State<_LeagueTable> {
     final bool isUser = row.teamId == game.userTeamId;
     final bool promotion = groupStage
         ? index < 2
-        : game.league != null && index < game.league!.promotionSlots;
+        : widget.tournament.isLeague &&
+              index < widget.tournament.promotionSlots;
     final bool relegation =
         !groupStage &&
-        game.league != null &&
-        game.league!.relegationSpots > 0 &&
-        index >= game.standings.length - game.league!.relegationSpots;
+        widget.tournament.isLeague &&
+        widget.tournament.relegationSpots > 0 &&
+        index >=
+            widget.stats.standings.length - widget.tournament.relegationSpots;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
       decoration: BoxDecoration(

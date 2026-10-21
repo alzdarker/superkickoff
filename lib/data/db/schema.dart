@@ -48,8 +48,10 @@ const String coachTransfers = 'coach_transfers';
 const String sponsors = 'sponsors';
 const String sponsorships = 'sponsorships';
 const String messages = 'messages';
+const String transferOffers = 'transfer_offers';
 const String worldRankingHistory = 'world_ranking_history';
 const String careerHistory = 'career_history';
+const String managerProfile = 'manager_profile';
 
 // ------------------------------------------------------- match statuses
 const int matchScheduled = 1;
@@ -84,3 +86,13 @@ const int statusDead = 3;
 const int awardTopScorer = 1;
 const int awardMvp = 2;
 const int awardYoungPlayer = 3;
+
+// -------------------------------------------- transfer_offers.status values
+const int offerPending = 1;
+const int offerAccepted = 2;
+const int offerRejected = 3;
+const int offerCountered = 4;
+const int offerContractNegotiation = 5;
+const int offerPlayerAccepted = 6;
+const int offerPlayerRejected = 7;
+const int offerCompleted = 8;

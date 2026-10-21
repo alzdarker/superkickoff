@@ -16,6 +16,7 @@ class SetupScreen extends StatefulWidget {
 }
 
 class _SetupScreenState extends State<SetupScreen> {
+  final TextEditingController _nameController = TextEditingController();
   int step = 0;
   Map<String, Object?>? selectedCountry;
   Map<String, Object?>? selectedLeague;
@@ -36,6 +37,12 @@ class _SetupScreenState extends State<SetupScreen> {
   }
 
   CareerProvider get game => context.read<CareerProvider>();
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
 
   Future<void> _loadCountries() async {
     setState(() => loadingOptions = true);
@@ -90,6 +97,7 @@ class _SetupScreenState extends State<SetupScreen> {
     );
     try {
       await game.startCareer(
+        managerName: _nameController.text.trim(),
         countryId: selectedCountry!['country_id'] as int,
         leagueTournament: leagueTournament,
         teamId: selectedTeam!['team_id'] as int,
@@ -168,19 +176,49 @@ class _SetupScreenState extends State<SetupScreen> {
 
   // ---------------------------------------------------------------- steps
 
-  Widget _countryStep() => _optionList(
-    title: 'Choose a country',
-    subtitle: 'Sorted alphabetically by country',
-    options: countryOptions,
-    headline: (Map<String, Object?> o) => o['name'].toString(),
-    subline: (Map<String, Object?> o) =>
-        '${o['team_count']} clubs • ${o['league_count']} leagues • power ${(o['power'] as int?) ?? 0}',
-    trailing: (Map<String, Object?> o) => Text(
-      (o['iso2'] ?? '') as String,
-      style: const TextStyle(color: AppTheme.textDim),
-    ),
-    onPick: _selectCountry,
-    emptyHint: 'No countries loaded',
+  Widget _countryStep() => Column(
+    children: <Widget>[
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: TextField(
+          controller: _nameController,
+          textCapitalization: TextCapitalization.words,
+          maxLength: 40,
+          decoration: const InputDecoration(
+            labelText: 'Your manager name',
+            hintText: 'e.g. Budi Santoso',
+            prefixIcon: Icon(Icons.person_outline),
+          ),
+        ),
+      ),
+      Expanded(
+        child: _optionList(
+          title: 'Choose your country',
+          subtitle: 'Your country determines the leagues available to manage.',
+          options: countryOptions,
+          headline: (Map<String, Object?> o) => o['name'].toString(),
+          subline: (Map<String, Object?> o) =>
+              '${o['team_count']} clubs • ${o['league_count']} leagues • power ${(o['power'] as int?) ?? 0}',
+          trailing: (Map<String, Object?> o) => Text(
+            (o['iso2'] ?? '') as String,
+            style: const TextStyle(color: AppTheme.textDim),
+          ),
+          onPick: (Map<String, Object?> country) {
+            if (_nameController.text.trim().isEmpty) {
+              setState(() => error = 'Enter your manager name first.');
+              return;
+            }
+            _selectCountry(country);
+          },
+          emptyHint: 'No countries loaded',
+        ),
+      ),
+      if (error != null)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(error!, style: const TextStyle(color: AppTheme.danger)),
+        ),
+    ],
   );
 
   Widget _leagueStep() => _optionList(

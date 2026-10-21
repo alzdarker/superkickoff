@@ -61,25 +61,51 @@ class StartScreen extends StatelessWidget {
                     FilledButton.icon(
                       icon: const Icon(Icons.play_arrow),
                       label: const Text('Continue Career'),
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const HomeScreen(),
-                        ),
-                      ),
+                      onPressed: () async {
+                        await context.read<CareerProvider>().continueCareer();
+                        if (!context.mounted) return;
+                        await Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const HomeScreen(),
+                          ),
+                        );
+                      },
                     ),
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
                     icon: const Icon(Icons.add),
-                    label: Text(
-                      game.hasCareer ? 'Already in a career' : 'New Career',
-                    ),
-                    onPressed: game.hasCareer
-                        ? null
-                        : () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const SetupScreen(),
+                    label: const Text('New Career'),
+                    onPressed: () async {
+                      if (game.hasCareer) {
+                        final bool? replace = await showDialog<bool>(
+                          context: context,
+                          builder: (BuildContext context) => AlertDialog(
+                            title: const Text('Start a new career?'),
+                            content: const Text(
+                              'This permanently replaces the current local save.',
                             ),
+                            actions: <Widget>[
+                              TextButton(
+                                onPressed: () => Navigator.pop(context, false),
+                                child: const Text('Cancel'),
+                              ),
+                              FilledButton(
+                                onPressed: () => Navigator.pop(context, true),
+                                child: const Text('Replace'),
+                              ),
+                            ],
                           ),
+                        );
+                        if (replace != true) return;
+                        await game.newCareer();
+                      }
+                      if (!context.mounted) return;
+                      await Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const SetupScreen(),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 30),
                   Text(

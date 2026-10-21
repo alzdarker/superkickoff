@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:superkickoff/data/db/app_database.dart';
 import 'package:superkickoff/data/db/schema.dart' as t;
 import 'package:superkickoff/data/models/models.dart';
 import 'package:superkickoff/data/repositories/match_repository.dart';
@@ -37,6 +38,7 @@ void main() {
       target.path,
       options: OpenDatabaseOptions(version: 1, readOnly: false),
     );
+    await AppDatabase.ensureLocalTables(db);
   });
 
   tearDownAll(() async {

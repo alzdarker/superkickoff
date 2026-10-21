@@ -19,6 +19,8 @@ class AppDatabase {
 
   static const String dbName = 'superkickoff_2025.db';
   static Database? _db;
+  static String? _path;
+  static String? _sessionPath;
 
   /// Opens (and lazily installs) the database. Desktop platforms use
   /// [sqflite_common_ffi]; Android/iOS use the default sqflite bindings.
@@ -37,17 +39,26 @@ class AppDatabase {
       await file.parent.create(recursive: true);
       await file.writeAsBytes(bytes, flush: true);
     }
+    _path = target;
+    _sessionPath = '$target.session';
     _db = await databaseFactory.openDatabase(
       target,
       options: OpenDatabaseOptions(version: 1, readOnly: false),
     );
-    await _ensureLocalTables(_db!);
+    await ensureLocalTables(_db!);
     return _db!;
   }
 
   /// Tables that belong to the save game rather than the bundled reference
   /// data. Created lazily so existing installs pick them up on the next run.
-  static Future<void> _ensureLocalTables(Database db) async {
+  static Future<void> ensureLocalTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${t.managerProfile} (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        name TEXT NOT NULL,
+        country_id INTEGER NOT NULL
+      )
+    ''');
     await db.execute('''
       CREATE TABLE IF NOT EXISTS ${t.teamTactics} (
         team_id INTEGER PRIMARY KEY,
@@ -70,6 +81,33 @@ class AppDatabase {
         sessions INTEGER NOT NULL DEFAULT 0
       )
     ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${t.transferOffers} (
+        offer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id INTEGER NOT NULL,
+        from_team_id INTEGER NOT NULL,
+        to_team_id INTEGER NOT NULL,
+        offer_amount INTEGER NOT NULL,
+        player_value INTEGER NOT NULL,
+        status INTEGER NOT NULL DEFAULT 1,
+        counter_amount INTEGER,
+        proposed_salary INTEGER,
+        proposed_duration_years INTEGER,
+        created_date TEXT NOT NULL,
+        updated_date TEXT,
+        message_id INTEGER
+      )
+    ''');
+    final List<Map<String, Object?>> messageColumns = await db.rawQuery(
+      'PRAGMA table_info(${t.messages})',
+    );
+    if (!messageColumns.any(
+      (Map<String, Object?> column) => column['name'] == 'transfer_offer_id',
+    )) {
+      await db.execute(
+        'ALTER TABLE ${t.messages} ADD COLUMN transfer_offer_id INTEGER',
+      );
+    }
     await db.execute('''
       UPDATE teams
       SET abbreviation = CASE name
@@ -112,8 +150,48 @@ class AppDatabase {
       path,
       options: OpenDatabaseOptions(version: 1, readOnly: false),
     );
-    await _ensureLocalTables(_db!);
+    await ensureLocalTables(_db!);
     return _db!;
+  }
+
+  /// Captures the pre-session save so "Don't save" can restore it.
+  static Future<void> beginSession() async {
+    final String? path = _path;
+    if (path == null || _db == null) return;
+    final File snapshot = File(_sessionPath!);
+    if (!snapshot.existsSync()) await File(path).copy(snapshot.path);
+  }
+
+  /// Commits or restores the snapshot created by [beginSession].
+  static Future<void> finishSession({required bool save}) async {
+    final String? path = _path;
+    final String? snapshotPath = _sessionPath;
+    if (path == null || snapshotPath == null) return;
+    final File snapshot = File(snapshotPath);
+    if (save || !snapshot.existsSync()) {
+      if (snapshot.existsSync()) await snapshot.delete();
+      return;
+    }
+    await _db?.close();
+    _db = null;
+    await snapshot.copy(path);
+    await snapshot.delete();
+    await open();
+  }
+
+  /// Starts a genuinely fresh local career without mutating the bundled DB.
+  static Future<void> reset() async {
+    final Directory docs = await getApplicationDocumentsDirectory();
+    final String target = p.join(docs.path, dbName);
+    await _db?.close();
+    _db = null;
+    final File snapshot = File('$target.session');
+    if (snapshot.existsSync()) await snapshot.delete();
+    final ByteData asset = await rootBundle.load('assets/data/$dbName');
+    await File(target).writeAsBytes(asset.buffer.asUint8List(), flush: true);
+    _path = target;
+    _sessionPath = '$target.session';
+    await open();
   }
 
   static Future<void> close() async {
